@@ -9,7 +9,7 @@ concurrency:
 
 jobs:
   build-debug-v8a:
-    name: Build arm64-v8a signed debug APK
+    name: Build arm64-v8a R8 debug-signed APK
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -32,20 +32,28 @@ jobs:
       - name: Get current version
         id: get_version
         run: |
-          GRADLE_FILE="app/build.gradle.kts"
-          CURRENT_VN=$(grep "versionName =" "$GRADLE_FILE" | sed 's/.*"\(.*\)".*/\1/')
+          CURRENT_VN=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          test -n "$CURRENT_VN"
           echo "VERSION=$CURRENT_VN" >> "$GITHUB_ENV"
-          echo "CURRENT_VN=$CURRENT_VN"
+          echo "Building AniZen v$CURRENT_VN"
 
-      - name: Build arm64-v8a R8 debug APK
-        run: ./gradlew assembleDebug -PabiList=arm64-v8a -Pandroid.enableR8.fullMode=true -Pdisable-code-shrink=false -Pinclude-telemetry=false -Penable-updater=false --no-daemon
+      - name: Build arm64-v8a maximum R8 debug-signed APK
+        run: ./gradlew assembleR8Debug -PabiList=arm64-v8a -Pandroid.enableR8.fullMode=true -Pinclude-telemetry=false -Penable-updater=false --no-daemon
 
-      - name: Rename APK
+      - name: Rename and validate APK
         run: |
           VERSION="${{ env.VERSION }}"
           mkdir -p dist
-          find app/build/outputs/apk/debug -type f -name "*.apk" -exec cp {} "dist/AniZen-v${VERSION}-v8a-r8-debug.apk" \;
-          test -s "dist/AniZen-v${VERSION}-v8a-r8-debug.apk"
+          find app/build/outputs/apk/r8Debug -type f -name "*.apk" -exec cp {} "dist/AniZen-v${VERSION}-v8a-r8-debug.apk" \;
+          APK="dist/AniZen-v${VERSION}-v8a-r8-debug.apk"
+          test -s "$APK"
+          SIZE_BYTES=$(stat -c%s "$APK")
+          SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
+          echo "APK size: ${SIZE_MB} MiB (${SIZE_BYTES} bytes)"
+          if [ "$SIZE_MB" -gt 100 ]; then
+            echo "The optimized APK exceeds the expected size ceiling." >&2
+            exit 1
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
