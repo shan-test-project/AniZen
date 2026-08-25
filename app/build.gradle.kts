@@ -74,6 +74,20 @@ android {
             versionNameSuffix = "-${getCommitCount()}"
             isPseudoLocalesEnabled = true
         }
+        maybeCreate("r8Debug").apply {
+            initWith(debug)
+            // Keep debug signing, but disable debuggable mode so R8 can optimize fully.
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-android-optimize.txt",
+                "proguard-rules.pro",
+            )
+            matchingFallbacks.add(debug.name)
+        }
         val release by getting {
             isMinifyEnabled = Config.enableCodeShrink
             isShrinkResources = Config.enableCodeShrink
