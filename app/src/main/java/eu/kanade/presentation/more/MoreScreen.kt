@@ -97,7 +97,6 @@ fun MoreScreen(
     onDownloadedOnlyChange: (Boolean) -> Unit,
     incognitoMode: Boolean,
     onIncognitoModeChange: (Boolean) -> Unit,
-    isFDroid: Boolean,
     hiddenTabs: List<NavItem>,
     onClickDownloadQueue: () -> Unit,
     onClickCategories: () -> Unit,
