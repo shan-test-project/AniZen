@@ -804,9 +804,10 @@ class AnimeScreenModel(
     private fun fetchSuggestions(anime: Anime, manualFetch: Boolean = false) {
         val now = System.currentTimeMillis()
         val cached = suggestionsCache.get(anime.id)
-        if (cached != null && (now - cached.timestamp) < CACHE_TTL) {
+        val hasFreshCache = cached != null && (now - cached.timestamp) < CACHE_TTL
+        if (cached != null) {
             updateSuccessState { it.copySuccess(suggestionSections = cached.sections, isSuggestionsLoading = false) }
-            return
+            if (hasFreshCache && !manualFetch) return
         }
 
         if (!manualFetch) {
@@ -820,24 +821,35 @@ class AnimeScreenModel(
             }
         }
 
-        updateSuccessState { it.copySuccess(isSuggestionsLoading = true) }
+        if (fetchSuggestionsJob?.isActive == true) {
+            if (!manualFetch) return
+            fetchSuggestionsJob?.cancel()
+        }
 
-        fetchSuggestionsJob?.cancel()
+        updateSuccessState { it.copySuccess(isSuggestionsLoading = cached == null) }
+
         fetchSuggestionsJob = screenModelScope.launch(suggestionsDispatcher) {
             try {
-                // Update affinity vector in background if needed
-                calculateUserAffinity.await()
-
                 val source = sourceManager.get(anime.source) as? AnimeCatalogueSource ?: run {
                     updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
                     return@launch
                 }
                 val library = getLibraryAnime.await()
 
-                val affinityMap = try {
+                var affinityMap = try {
                     val json = Json.parseToJsonElement(libraryPreferences.userAffinityMap().get()).jsonObject
                     json.mapValues { it.value.jsonPrimitive.float }
                 } catch (e: Exception) { emptyMap<String, Float>() }
+
+                // Recalculate only when there is no saved profile. This avoids blocking
+                // every recommendation load on a full-library scan.
+                if (affinityMap.isEmpty()) {
+                    calculateUserAffinity.await()
+                    affinityMap = try {
+                        val json = Json.parseToJsonElement(libraryPreferences.userAffinityMap().get()).jsonObject
+                        json.mapValues { it.value.jsonPrimitive.float }
+                    } catch (e: Exception) { emptyMap<String, Float>() }
+                }
 
                 // Only deduplicate against the current anime itself to keep density high as requested
                 val initialSections = SuggestionSection.Type.entries.map { type ->
@@ -896,13 +908,13 @@ class AnimeScreenModel(
                         val finalSections = initialSections
                             .sortedBy { it.type }
                             .toImmutableList()
-                        suggestionsCache.put(anime.id, CachedSuggestions(finalSections, System.currentTimeMillis()))
                         _suggestionsUpdateFlow.tryEmit(anime.id)
                         state.copySuccess(suggestionSections = finalSections)
                     }
                 }
 
                 // Discovery Load
+                var discoveryCompleted = false
                 kotlinx.coroutines.withTimeoutOrNull(20000L) {
                     kotlinx.coroutines.coroutineScope {
                         // 0. Franchise & Sequels (Strict Verification)
@@ -928,9 +940,14 @@ class AnimeScreenModel(
                             try {
                                 val searchResult = source.getSearchAnime(1, keywords, AnimeFilterList())
                                 val domainAnimes = searchResult.animes
-                                    .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
+                                    .map { result ->
+                                        async {
+                                            networkToLocalAnime.await(result.toDomainAnime(anime.source))
+                                                .let { getAnime.await(it.id) }
+                                        }
+                                    }
                                     .awaitAll()
-                                    .mapNotNull { getAnime.await(it.id) }
+                                    .filterNotNull()
                                 if (domainAnimes.isNotEmpty()) updateSection(SuggestionSection.Type.Similarity, domainAnimes)
                             } catch (_: Exception) {}
                         }
@@ -942,9 +959,14 @@ class AnimeScreenModel(
                                     if (animes.isNotEmpty()) {
                                         kotlinx.coroutines.coroutineScope {
                                             val domainAnimes = animes
-                                                .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
+                                                .map { result ->
+                                                    async {
+                                                        networkToLocalAnime.await(result.toDomainAnime(anime.source))
+                                                            .let { getAnime.await(it.id) }
+                                                    }
+                                                }
                                                 .awaitAll()
-                                                .mapNotNull { getAnime.await(it.id) }
+                                                .filterNotNull()
                                             updateSection(SuggestionSection.Type.Source, domainAnimes)
                                         }
                                     }
@@ -1001,9 +1023,14 @@ class AnimeScreenModel(
                                                 }
                                                 val searchResult = source.getSearchAnime(1, query, safeFilterList)
                                                 searchResult.animes
-                                                    .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
+                                                    .map { result ->
+                                                        async {
+                                                            networkToLocalAnime.await(result.toDomainAnime(anime.source))
+                                                                .let { getAnime.await(it.id) }
+                                                        }
+                                                    }
                                                     .awaitAll()
-                                                    .mapNotNull { getAnime.await(it.id) }
+                                                    .filterNotNull()
                                             } catch (_: Exception) {
                                                 emptyList()
                                             }
@@ -1015,11 +1042,20 @@ class AnimeScreenModel(
                             } ?: updateSection(SuggestionSection.Type.Tag, emptyList())
                         }
                     }
+                    discoveryCompleted = true
                 } ?: updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
             } catch (e: Exception) {
                 // Log error if needed
             } finally {
-                updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
+                updateSuccessState { state ->
+                    if (discoveryCompleted) {
+                        suggestionsCache.put(
+                            anime.id,
+                            CachedSuggestions(state.suggestionSections, System.currentTimeMillis()),
+                        )
+                    }
+                    state.copySuccess(isSuggestionsLoading = false)
+                }
             }
         }
     }
