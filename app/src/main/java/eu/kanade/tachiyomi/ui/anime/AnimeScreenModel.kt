@@ -829,6 +829,7 @@ class AnimeScreenModel(
         updateSuccessState { it.copySuccess(isSuggestionsLoading = cached == null) }
 
         fetchSuggestionsJob = screenModelScope.launch(suggestionsDispatcher) {
+            var discoveryCompleted = false
             try {
                 val source = sourceManager.get(anime.source) as? AnimeCatalogueSource ?: run {
                     updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
@@ -914,7 +915,6 @@ class AnimeScreenModel(
                 }
 
                 // Discovery Load
-                var discoveryCompleted = false
                 kotlinx.coroutines.withTimeoutOrNull(20000L) {
                     kotlinx.coroutines.coroutineScope {
                         // 0. Franchise & Sequels (Strict Verification)
