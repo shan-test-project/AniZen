@@ -80,6 +80,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import logcat.LogPriority
 import mihon.domain.episode.interactor.FilterEpisodesForDownload
 import tachiyomi.core.common.i18n.stringResource
@@ -131,7 +133,6 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.float
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import tachiyomi.domain.anime.interactor.CalculateUserAffinity
 import tachiyomi.domain.anime.interactor.GetLibraryAnime
 import tachiyomi.domain.library.model.LibraryAnime
 import tachiyomi.domain.library.service.LibraryPreferences
@@ -201,7 +202,6 @@ class AnimeScreenModel(
     private val getAnime: GetAnime = Injekt.get(),
     private val networkToLocalAnime: NetworkToLocalAnime = Injekt.get(),
     private val getRelatedAnime: GetRelatedAnime = Injekt.get(),
-    private val calculateUserAffinity: CalculateUserAffinity = Injekt.get(),
     private val getLibraryAnime: GetLibraryAnime = Injekt.get(),
     private val getSeasonsByAnimeId: tachiyomi.domain.anime.interactor.GetSeasonsByAnimeId = Injekt.get(),
     private val getAnimeSeasonsById: tachiyomi.domain.season.interactor.GetAnimeSeasonsById = Injekt.get(),
@@ -215,6 +215,13 @@ class AnimeScreenModel(
     private val setExcludedScanlators: tachiyomi.domain.episode.interactor.SetExcludedScanlators = Injekt.get(),
     private val getAvailableScanlators: tachiyomi.domain.episode.interactor.GetAvailableScanlators = Injekt.get(),
 ) : StateScreenModel<AnimeScreenModel.State>(State.Loading) {
+
+    /**
+     * Cast was originally fetched only while adding a tracker. Keep a small retry
+     * window here so imported/restored tracker rows can hydrate the same data
+     * without making a request on every tracker-flow emission.
+     */
+    private val castFetchAttempts = mutableMapOf<String, Long>()
 
     private val successState: State.Success?
         get() = state.value as? State.Success
@@ -253,7 +260,7 @@ class AnimeScreenModel(
     val showFileSize = storagePreferences.showEpisodeFileSize().get()
 
     private var fetchSuggestionsJob: kotlinx.coroutines.Job? = null
-    private val suggestionsDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(3)
+    private val suggestionsDispatcher = kotlinx.coroutines.Dispatchers.IO
 
     private fun State.Success.copySuccess(
         anime: Anime = this.anime,
@@ -588,27 +595,11 @@ class AnimeScreenModel(
                 TorrentServerUtils.setTrackersList()
             }
 
-            // Set initial state from database and local schedule cache
-            val nowMillis = System.currentTimeMillis()
-            val initialWithSchedule = if (anime.nextUpdate <= 0L || anime.nextUpdate < nowMillis) {
-                val cachedAiringTime = resolveCachedScheduleAirTime(anime.title)
-                if (cachedAiringTime != null) {
-                    val nextMillis = cachedAiringTime * 1000L
-                    if (anime.favorite) {
-                        updateAnime.await(AnimeUpdate(id = anime.id, nextUpdate = nextMillis))
-                    }
-                    anime.copy(nextUpdate = nextMillis)
-                } else {
-                    anime
-                }
-            } else {
-                anime
-            }
-
+            // Set initial state from database
             val savedSeason = libraryPreferences.lastSelectedSeason(animeId).get().takeIf { it.isNotEmpty() }
             mutableState.update {
                 State.Success.create(
-                    anime = initialWithSchedule,
+                    anime = anime,
                     source = animeSource,
                     isFromSource = isFromSource,
                     episodes = initialEpisodes,
@@ -681,36 +672,10 @@ class AnimeScreenModel(
                         screenModelScope.launch { fetchSeasonsFromSource() }
                     }
 
-                    val nowMs = System.currentTimeMillis()
-                    val effectiveNextUpdate = if (correctedAnime.nextUpdate > nowMs) {
-                        correctedAnime.nextUpdate
-                    } else {
-                        val currentNextUpdate = successState?.anime?.nextUpdate ?: 0L
-                        if (currentNextUpdate > nowMs) {
-                            currentNextUpdate
-                        } else {
-                            val cachedTime = resolveCachedScheduleAirTime(correctedAnime.title)
-                            if (cachedTime != null) {
-                                val millis = cachedTime * 1000L
-                                if (correctedAnime.favorite) {
-                                    updateAnime.await(AnimeUpdate(id = correctedAnime.id, nextUpdate = millis))
-                                }
-                                millis
-                            } else {
-                                correctedAnime.nextUpdate
-                            }
-                        }
-                    }
-                    val finalAnime = if (effectiveNextUpdate != correctedAnime.nextUpdate) {
-                        correctedAnime.copy(nextUpdate = effectiveNextUpdate)
-                    } else {
-                        correctedAnime
-                    }
-
                     updateSuccessState {
                         it.copySuccess(
-                            anime = finalAnime,
-                            episodes = episodes.toEpisodeListItems(finalAnime),
+                            anime = correctedAnime,
+                            episodes = episodes.toEpisodeListItems(correctedAnime),
                             seasons = seasons.toImmutableList(),
                             processedSeasonItems = seasonItems.toImmutableList(),
                             availableScanlators = availableScanlators.toImmutableList(),
@@ -789,6 +754,7 @@ class AnimeScreenModel(
         // Limit to 50 anime to prevent OOM, LruCache is thread-safe
         val suggestionsCache = android.util.LruCache<Long, CachedSuggestions>(50)
         private const val CACHE_TTL = 60 * 60 * 1000L // 1 hour
+        private const val CAST_RETRY_INTERVAL_MS = 5 * 60 * 1000L
 
         private val _suggestionsUpdateFlow = kotlinx.coroutines.flow.MutableSharedFlow<Long>(extraBufferCapacity = 1)
         val suggestionsUpdateFlow = _suggestionsUpdateFlow.asSharedFlow()
@@ -804,10 +770,9 @@ class AnimeScreenModel(
     private fun fetchSuggestions(anime: Anime, manualFetch: Boolean = false) {
         val now = System.currentTimeMillis()
         val cached = suggestionsCache.get(anime.id)
-        val hasFreshCache = cached != null && (now - cached.timestamp) < CACHE_TTL
-        if (cached != null) {
+        if (cached != null && (now - cached.timestamp) < CACHE_TTL) {
             updateSuccessState { it.copySuccess(suggestionSections = cached.sections, isSuggestionsLoading = false) }
-            if (hasFreshCache && !manualFetch) return
+            return
         }
 
         if (!manualFetch) {
@@ -821,36 +786,28 @@ class AnimeScreenModel(
             }
         }
 
-        if (fetchSuggestionsJob?.isActive == true) {
-            if (!manualFetch) return
-            fetchSuggestionsJob?.cancel()
-        }
+        // Details and episode updates can arrive together while the screen is starting.
+        // Reusing the in-flight request prevents those updates from repeatedly cancelling
+        // and restarting the network work.
+        if (fetchSuggestionsJob?.isActive == true) return
 
-        updateSuccessState { it.copySuccess(isSuggestionsLoading = cached == null) }
+        updateSuccessState { it.copySuccess(isSuggestionsLoading = true) }
 
+        fetchSuggestionsJob?.cancel()
         fetchSuggestionsJob = screenModelScope.launch(suggestionsDispatcher) {
-            var discoveryCompleted = false
             try {
                 val source = sourceManager.get(anime.source) as? AnimeCatalogueSource ?: run {
                     updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
                     return@launch
                 }
-                val library = getLibraryAnime.await()
+                // Load ranking context alongside the source requests. The library query
+                // must not delay the first recommendation result from appearing.
+                val libraryDeferred = async { getLibraryAnime.await() }
 
-                var affinityMap = try {
+                val affinityMap = try {
                     val json = Json.parseToJsonElement(libraryPreferences.userAffinityMap().get()).jsonObject
                     json.mapValues { it.value.jsonPrimitive.float }
                 } catch (e: Exception) { emptyMap<String, Float>() }
-
-                // Recalculate only when there is no saved profile. This avoids blocking
-                // every recommendation load on a full-library scan.
-                if (affinityMap.isEmpty()) {
-                    calculateUserAffinity.await()
-                    affinityMap = try {
-                        val json = Json.parseToJsonElement(libraryPreferences.userAffinityMap().get()).jsonObject
-                        json.mapValues { it.value.jsonPrimitive.float }
-                    } catch (e: Exception) { emptyMap<String, Float>() }
-                }
 
                 // Only deduplicate against the current anime itself to keep density high as requested
                 val initialSections = SuggestionSection.Type.entries.map { type ->
@@ -867,7 +824,12 @@ class AnimeScreenModel(
                     )
                 }.toMutableList()
 
-                fun rankAndSortItems(items: List<Anime>, currentAnime: Anime, type: SuggestionSection.Type): List<Anime> {
+                fun rankAndSortItems(
+                    items: List<Anime>,
+                    currentAnime: Anime,
+                    type: SuggestionSection.Type,
+                    library: List<LibraryAnime>,
+                ): List<Anime> {
                     val currentClean = eu.kanade.tachiyomi.util.lang.StringSimilarity.cleanTitle(currentAnime.title)
                     return items.distinctBy { it.id to it.url }
                         .filter { it.id != currentAnime.id && it.url != currentAnime.url }
@@ -897,25 +859,37 @@ class AnimeScreenModel(
                         .map { it.first }
                 }
 
-                fun updateSection(type: SuggestionSection.Type, items: List<Anime>) {
-                    val currentSuccess = successState ?: return
-                    val rankedItems = rankAndSortItems(items, currentSuccess.anime, type).toImmutableList()
-                    
-                    updateSuccessState { state ->
-                        val index = initialSections.indexOfFirst { it.type == type }
-                        if (index != -1) {
-                            initialSections[index] = initialSections[index].copy(items = rankedItems)
+                val sectionMutex = Mutex()
+
+                suspend fun updateSection(type: SuggestionSection.Type, items: List<Anime>) {
+                    sectionMutex.withLock {
+                        val currentSuccess = successState ?: return
+                        val rankedItems = rankAndSortItems(
+                            items = items,
+                            currentAnime = currentSuccess.anime,
+                            type = type,
+                            library = libraryDeferred.await(),
+                        ).toImmutableList()
+
+                        updateSuccessState { state ->
+                            val index = initialSections.indexOfFirst { it.type == type }
+                            if (index != -1) {
+                                initialSections[index] = initialSections[index].copy(items = rankedItems)
+                            }
+                            val finalSections = initialSections
+                                .sortedBy { it.type }
+                                .toImmutableList()
+                            suggestionsCache.put(anime.id, CachedSuggestions(finalSections, System.currentTimeMillis()))
+                            _suggestionsUpdateFlow.tryEmit(anime.id)
+                            state.copySuccess(suggestionSections = finalSections)
                         }
-                        val finalSections = initialSections
-                            .sortedBy { it.type }
-                            .toImmutableList()
-                        _suggestionsUpdateFlow.tryEmit(anime.id)
-                        state.copySuccess(suggestionSections = finalSections)
                     }
                 }
 
                 // Discovery Load
-                kotlinx.coroutines.withTimeoutOrNull(20000L) {
+                // Recommendations are supplementary content; never hold the screen in a
+                // loading state longer than the source itself is useful.
+                kotlinx.coroutines.withTimeoutOrNull(8000L) {
                     kotlinx.coroutines.coroutineScope {
                         // 0. Franchise & Sequels (Strict Verification)
                         launch {
@@ -923,9 +897,9 @@ class AnimeScreenModel(
                                 val rawVirtualSeasons = discoverSeasons.await(anime)
                                 if (rawVirtualSeasons.isNotEmpty()) {
                                     val validSeasons = rawVirtualSeasons
+                                        .take(12)
                                         .map { async { networkToLocalAnime.await(it) } }
                                         .awaitAll()
-                                        .mapNotNull { getAnime.await(it.id) }
 
                                     if (validSeasons.isNotEmpty()) {
                                         updateSection(SuggestionSection.Type.Franchise, validSeasons)
@@ -938,16 +912,11 @@ class AnimeScreenModel(
                         launch {
                             val keywords = eu.kanade.tachiyomi.util.lang.StringSimilarity.getSearchKeywords(anime.title)
                             try {
-                                val searchResult = source.getSearchAnime(1, keywords, AnimeFilterList())
+                                val searchResult = source.getSearchAnime(1, keywords, source.getFilterList())
                                 val domainAnimes = searchResult.animes
-                                    .map { result ->
-                                        async {
-                                            networkToLocalAnime.await(result.toDomainAnime(anime.source))
-                                                .let { getAnime.await(it.id) }
-                                        }
-                                    }
+                                    .take(12)
+                                    .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
                                     .awaitAll()
-                                    .filterNotNull()
                                 if (domainAnimes.isNotEmpty()) updateSection(SuggestionSection.Type.Similarity, domainAnimes)
                             } catch (_: Exception) {}
                         }
@@ -959,14 +928,9 @@ class AnimeScreenModel(
                                     if (animes.isNotEmpty()) {
                                         kotlinx.coroutines.coroutineScope {
                                             val domainAnimes = animes
-                                                .map { result ->
-                                                    async {
-                                                        networkToLocalAnime.await(result.toDomainAnime(anime.source))
-                                                            .let { getAnime.await(it.id) }
-                                                    }
-                                                }
+                                                .take(12)
+                                                .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
                                                 .awaitAll()
-                                                .filterNotNull()
                                             updateSection(SuggestionSection.Type.Source, domainAnimes)
                                         }
                                     }
@@ -980,9 +944,9 @@ class AnimeScreenModel(
                                 updateSection(SuggestionSection.Type.Tag, emptyList())
                                 return@launch
                             }
-                            kotlinx.coroutines.withTimeoutOrNull(15000L) {
+                            kotlinx.coroutines.withTimeoutOrNull(6000L) {
                                 kotlinx.coroutines.coroutineScope {
-                                    val tags = anime.genre?.take(3) ?: emptyList()
+                                    val tags = anime.genre?.take(2) ?: emptyList()
                                     val results = tags.map { tag ->
                                         async {
                                             try {
@@ -1016,21 +980,11 @@ class AnimeScreenModel(
                                                     }
                                                 }
 
-                                                val safeFilterList = if (query.isNotBlank() && filterList.isPlaceholderOrEmpty()) {
-                                                    AnimeFilterList()
-                                                } else {
-                                                    filterList
-                                                }
-                                                val searchResult = source.getSearchAnime(1, query, safeFilterList)
+                                                val searchResult = source.getSearchAnime(1, query, filterList)
                                                 searchResult.animes
-                                                    .map { result ->
-                                                        async {
-                                                            networkToLocalAnime.await(result.toDomainAnime(anime.source))
-                                                                .let { getAnime.await(it.id) }
-                                                        }
-                                                    }
+                                                    .take(8)
+                                                    .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
                                                     .awaitAll()
-                                                    .filterNotNull()
                                             } catch (_: Exception) {
                                                 emptyList()
                                             }
@@ -1042,20 +996,11 @@ class AnimeScreenModel(
                             } ?: updateSection(SuggestionSection.Type.Tag, emptyList())
                         }
                     }
-                    discoveryCompleted = true
                 } ?: updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
             } catch (e: Exception) {
                 // Log error if needed
             } finally {
-                updateSuccessState { state ->
-                    if (discoveryCompleted) {
-                        suggestionsCache.put(
-                            anime.id,
-                            CachedSuggestions(state.suggestionSections, System.currentTimeMillis()),
-                        )
-                    }
-                    state.copySuccess(isSuggestionsLoading = false)
-                }
+                updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
             }
         }
     }
@@ -1916,6 +1861,7 @@ class AnimeScreenModel(
             }.distinctUntilChanged().collectLatest { trackItems -> 
                 updateSuccessState { it.copySuccess(trackItems = trackItems) }
                 updateAiringTime(anime, trackItems, manualFetch = false) 
+                fetchCastForTrackedAnime(successState?.anime ?: anime, trackItems)
                 
                 val anilistTrackItem = trackItems.find { it.tracker is eu.kanade.tachiyomi.data.track.anilist.Anilist && it.track != null }
                 if (anilistTrackItem != null) {
@@ -1934,6 +1880,40 @@ class AnimeScreenModel(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    private suspend fun fetchCastForTrackedAnime(anime: Anime, trackItems: List<TrackItem>) {
+        if (!anime.cast.isNullOrEmpty()) return
+
+        val candidates = trackItems.mapNotNull { item ->
+            val track = item.track ?: return@mapNotNull null
+            val tracker = item.tracker as? eu.kanade.tachiyomi.data.track.AnimeTracker
+                ?: return@mapNotNull null
+            if (track.remoteId <= 0L) return@mapNotNull null
+            Triple(tracker, track.remoteId, track.remoteUrl)
+        }
+
+        for ((tracker, remoteId, remoteUrl) in candidates) {
+            val attemptKey = "${anime.id}:${tracker.id}:$remoteId"
+            val lastAttempt = castFetchAttempts[attemptKey] ?: 0L
+            if (System.currentTimeMillis() - lastAttempt < CAST_RETRY_INTERVAL_MS) continue
+            castFetchAttempts[attemptKey] = System.currentTimeMillis()
+
+            try {
+                val cast = tracker.fetchCastByTitle(
+                    remoteId = remoteId,
+                    mediaType = if (remoteUrl.contains("/tv/", ignoreCase = true)) "tv" else "movie",
+                )
+                if (!cast.isNullOrEmpty()) {
+                    updateAnime.await(AnimeUpdate(id = anime.id, cast = cast))
+                    return
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) {
+                    "Could not fetch cast for tracked anime ${anime.id} from ${tracker.name}"
                 }
             }
         }
@@ -2125,23 +2105,6 @@ class AnimeScreenModel(
     }
 
     private fun showQualitiesDialog(episode: Episode) = updateSuccessState { it.copySuccess(dialog = Dialog.ShowQualities(episode, it.anime, it.source)) }
-
-    private suspend fun resolveCachedScheduleAirTime(animeTitle: String): Long? = withIOContext {
-        runCatching {
-            val cache = mihon.feature.airingschedule.ScheduleDataRefreshWorker.readCache(context) ?: return@withIOContext null
-            val nowEpoch = System.currentTimeMillis() / 1000L
-            val matchedEntry = cache.entries
-                .filter { it.airingAt >= nowEpoch }
-                .filter { entry ->
-                    mihon.feature.airingschedule.util.ScheduleTitleMatcher.matchesAny(
-                        animeTitle,
-                        mihon.feature.airingschedule.util.ScheduleTitleMatcher.candidateTitlesFromEntry(entry),
-                    )
-                }
-                .minByOrNull { it.airingAt }
-            matchedEntry?.airingAt
-        }.getOrNull()
-    }
 
     sealed interface State {
         @Immutable data object Loading : State

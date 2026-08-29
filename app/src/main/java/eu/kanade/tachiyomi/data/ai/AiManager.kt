@@ -1,17 +1,14 @@
 package eu.kanade.tachiyomi.data.ai
 
 import android.content.Context
-import eu.kanade.tachiyomi.data.ai.everythingmoe.EverythingMoeScraper
 import eu.kanade.domain.ai.AiPreferences
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.network.NetworkHelper
 import com.hippo.unifile.UniFile
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -25,7 +22,6 @@ import tachiyomi.core.common.util.system.logcat
 import logcat.LogPriority
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.storage.service.StorageManager
 import java.io.File
 import java.io.BufferedReader
@@ -36,15 +32,11 @@ class AiManager(
     private val networkHelper: NetworkHelper = Injekt.get(),
     private val aiPreferences: AiPreferences = Injekt.get(),
     private val extensionManager: ExtensionManager = Injekt.get(),
-    private val sourceManager: SourceManager = Injekt.get(),
     private val getLibraryAnime: tachiyomi.domain.anime.interactor.GetLibraryAnime = Injekt.get(),
     private val json: Json = Injekt.get(),
 ) {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val keyFailures = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    private val everythingMoeScraper: EverythingMoeScraper by lazy {
-        EverythingMoeScraper(context, networkHelper, json)
-    }
 
     // Circuit Breaker Config
     private val MAP_VERSION = 132
@@ -63,11 +55,12 @@ class AiManager(
 
     fun chatWithAssistantStream(query: String, history: List<ChatMessage>): Flow<String> = flow {
         if (!aiPreferences.enableAi().get() || !aiPreferences.enableAiAssistant().get()) return@flow
-        
-        if (isCircuitBreakerTripped()) {
-            emit("Stability Alert: AI temporarily disabled due to detected app instability. [RESET_REQUIRED]")
-            return@flow
-        }
+
+        // A request can leave these preferences set when Android kills the
+        // process while the provider is streaming. That state is stale by the
+        // time a new flow is created and must not lock the assistant forever.
+        recoverInterruptedRequestState()
+
         if (isRemoteKillSwitchActive()) {
             emit("Service Maintenance: AI Assistant is currently offline.")
             return@flow
@@ -93,7 +86,7 @@ class AiManager(
         val customPrompt = aiPreferences.aiSystemPrompt().get()
         val defaultSystemInstruction = """
             You are the 'AniZen System Assistant', a senior systems engineer.
-            You have access to native diagnostic tools for logs, system maps, the user's anime library, and EverythingMoe extension intelligence.
+            You have access to native diagnostic tools for logs, system maps, and the user's anime library.
             
             OPERATIONAL PROTOCOLS:
             1. FORMATTING: STRICTLY NO TABLES. Use bullet points or lists for structured data. NEVER output Markdown tables.
@@ -101,8 +94,7 @@ class AiManager(
             3. GROUNDED NAVIGATION: Use get_app_navigation_guide. If a [STALENESS_WARNING] is present, inform the user that menu paths may have changed in their version.
             4. CRASH ANALYSIS: Prioritize "PINNED" blocks in logs as they contain the root cause of failures.
             5. LIBRARY AWARENESS: Use the [USER_LIBRARY_DATA] block to answer questions about the user's collection, recommendations, or statistics.
-            6. EXTENSION & COMMUNITY INTELLIGENCE: Use [EXTENSION_COMMUNITY_INTELLIGENCE] (from EverythingMoe) for accurate site status, active mirrors, stream tags (1080p, dubs, soft-subs), and community reviews. Clearly differentiate extensions that are actually INSTALLED on the user's device versus external directory listings.
-            7. PRIVACY: PII (Auth headers, Cookies, and URL params) is strictly redacted.
+            6. PRIVACY: PII (Auth headers, Cookies, and URL params) is strictly redacted.
         """.trimIndent()
         
         val systemInstruction = if (customPrompt.isNotBlank()) customPrompt else defaultSystemInstruction
@@ -153,8 +145,8 @@ class AiManager(
 
     fun getStatisticsAnalysisStream(statsSummary: String): Flow<String> = flow {
         if (!aiPreferences.enableAi().get() || !aiPreferences.enableAiStatistics().get()) return@flow
-        
-        if (isCircuitBreakerTripped()) return@flow
+
+        recoverInterruptedRequestState()
 
         val engine = aiPreferences.aiEngine().get()
         val apiKey = when (engine) {
@@ -205,13 +197,14 @@ class AiManager(
         }
     }
 
-    private fun isCircuitBreakerTripped(): Boolean {
-        // If the app crashed during the last request, trip the breaker
-        if (aiPreferences.isRequestPending().get()) {
-            aiPreferences.isCircuitBreakerTripped().set(true)
-            return true
+    private fun recoverInterruptedRequestState() {
+        if (aiPreferences.isRequestPending().get() || aiPreferences.isCircuitBreakerTripped().get()) {
+            logcat(LogPriority.WARN) {
+                "Clearing stale AI request state from an interrupted provider request"
+            }
+            aiPreferences.isRequestPending().set(false)
+            aiPreferences.isCircuitBreakerTripped().set(false)
         }
-        return aiPreferences.isCircuitBreakerTripped().get()
     }
 
     private suspend fun isRemoteKillSwitchActive(): Boolean = withIOContext {
@@ -349,7 +342,7 @@ class AiManager(
             - General: Settings > General
             - Appearance: Settings > Appearance (Theme, Monet, Dark Mode)
             - Library: Settings > Library (Update intervals, Columns)
-            - Player: Settings > Player (Shaders/Anime4K, Orientation, Subtitles, External Player)
+            - Player: Settings > Player (MPV decoder, orientation, subtitles, external player)
             - Downloads: Settings > Downloads (Threads, Cache)
             - Tracking: Settings > Tracking (Anilist, MAL)
             - Advanced: Settings > Advanced (Log viewer, Cache, Database)
@@ -357,71 +350,10 @@ class AiManager(
         """.trimIndent()
     }
 
-    private suspend fun getInstalledExtensions(): List<eu.kanade.tachiyomi.extension.model.Extension.Installed> {
-        return try {
-            if (!extensionManager.isInitialized.value) {
-                withTimeoutOrNull(2000) {
-                    extensionManager.isInitialized.first { it }
-                }
-            }
-            extensionManager.installedExtensionsFlow.value
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    private suspend fun getExtensionStatusSummary(installed: List<eu.kanade.tachiyomi.extension.model.Extension.Installed>): String {
-        if (installed.isEmpty()) {
-            val sources = try { sourceManager.getOnlineSources() } catch (e: Exception) { emptyList() }
-            return if (sources.isEmpty()) {
-                "No extensions or sources currently installed in AniZen."
-            } else {
-                "Registered Sources in App:\n" + sources.joinToString("\n") { s ->
-                    val bUrl = (s as? eu.kanade.tachiyomi.animesource.online.AnimeHttpSource)?.baseUrl ?: (s as? eu.kanade.tachiyomi.source.online.HttpSource)?.baseUrl ?: "N/A"
-                    "- ${s.name} (Lang: ${s.lang}, BaseUrl: `$bUrl`)"
-                }
-            }
-        }
-        return installed.joinToString("\n") { ext ->
-            val sourcesStr = ext.sources.joinToString(", ") { s ->
-                val bUrl = (s as? eu.kanade.tachiyomi.animesource.online.AnimeHttpSource)?.baseUrl ?: (s as? eu.kanade.tachiyomi.source.online.HttpSource)?.baseUrl ?: ""
-                if (bUrl.isNotBlank()) "${s.name} (`$bUrl`)" else s.name
-            }
-            "- **${ext.name}** (${ext.pkgName}) v${ext.versionName} [Sources: $sourcesStr, Obsolete: ${ext.isObsolete}, Update: ${ext.hasUpdate}]"
-        }
-    }
-
-    private suspend fun buildToolContext(lastQuery: String): String {
-        val toolContext = StringBuilder()
-        val queryLower = lastQuery.lowercase()
-        val installed = getInstalledExtensions()
-
-        if (queryLower.contains("""log|error|fail|video|load|setting|where|how|device|black|broke|froze|slow|crash|die|dead|bug|stuck|lag|hang|freeze""".toRegex())) {
-            if (aiPreferences.aiAssistantLogs().get()) {
-                toolContext.append("\n[DIAGNOSTICS_DATA]:\n${getSanitizedLogs()}\n")
-            }
-            toolContext.append("\n[NAVIGATION_MAP]:\n${getAppMap()}\n")
-            toolContext.append("\n[EXTENSIONS_STATUS]:\n${getExtensionStatusSummary(installed)}\n")
-            toolContext.append("\n[ENVIRONMENT]: ${getDeviceInfo()}\n")
-        }
-
-        if (queryLower.contains("""library|anime|watch|collection|have|my|list|recommend""".toRegex())) {
-            if (aiPreferences.aiAssistantLibrary().get()) {
-                toolContext.append("\n[USER_LIBRARY_DATA]:\n${getLibrarySummary()}\n")
-            }
-        }
-
-        if (queryLower.contains("""extension|source|site|domain|mirror|everythingmoe|stream|1080p|dub|sub|quality|down|dead|alive|link|recommend|best|working|broken""".toRegex()) ||
-            queryLower.contains("""log|error|fail|video|load|black|broke|froze|slow|crash|die|dead|bug|stuck""".toRegex())) {
-            if (aiPreferences.aiAssistantEverythingMoe().get()) {
-                val intel = everythingMoeScraper.getIntelligenceContext(lastQuery, installed)
-                if (intel.isNotBlank()) {
-                    toolContext.append("\n[EXTENSION_COMMUNITY_INTELLIGENCE (EverythingMoe)]:\n$intel\n")
-                }
-            }
-        }
-
-        return toolContext.toString().trim()
+    private fun getExtensionStatusSummary(): String {
+        val installed: List<eu.kanade.tachiyomi.extension.model.Extension.Installed> = extensionManager.installedExtensionsFlow.value
+        return if (installed.isEmpty()) "No extensions installed."
+        else installed.joinToString("\n") { "- ${it.name} (${it.pkgName}) v${it.versionName} [Obsolete: ${it.isObsolete}, Update: ${it.hasUpdate}]" }
     }
 
     private fun getDeviceInfo(): String = "Model: ${android.os.Build.MODEL}, SDK: ${android.os.Build.VERSION.SDK_INT}, App: AniZen"
@@ -488,9 +420,24 @@ class AiManager(
         }
 
         val finalMessages = if (withTools) {
-            val lastQuery = messages.last().content
-            val toolContext = buildToolContext(lastQuery)
-            messages.dropLast(1) + ChatMessage("user", messages.last().content + if (toolContext.isNotBlank()) "\n\n$toolContext" else "")
+            val lastQuery = messages.last().content.lowercase()
+            val toolContext = StringBuilder()
+            
+            if (lastQuery.contains("""log|error|fail|video|load|setting|where|how|device|black|broke|froze|slow|crash|die|dead|bug|stuck|lag|hang|freeze""".toRegex())) {
+                if (aiPreferences.aiAssistantLogs().get()) {
+                    toolContext.append("\n[DIAGNOSTICS_DATA]:\n${getSanitizedLogs()}\n")
+                }
+                toolContext.append("\n[NAVIGATION_MAP]:\n${getAppMap()}\n")
+                toolContext.append("\n[EXTENSIONS_STATUS]:\n${getExtensionStatusSummary()}\n")
+                toolContext.append("\n[ENVIRONMENT]: ${getDeviceInfo()}\n")
+            }
+
+            if (lastQuery.contains("""library|anime|watch|collection|have|my|list|recommend""".toRegex())) {
+                if (aiPreferences.aiAssistantLibrary().get()) {
+                    toolContext.append("\n[USER_LIBRARY_DATA]:\n${getLibrarySummary()}\n")
+                }
+            }
+            messages.dropLast(1) + ChatMessage("user", messages.last().content + "\n\n" + toolContext.toString())
         } else {
             messages
         }
@@ -708,9 +655,19 @@ class AiManager(
             withTools: Boolean = false
         ): Flow<String> = flow {
             val finalMessages = if (withTools) {
-                val lastQuery = messages.last().content
-                val toolContext = buildToolContext(lastQuery)
-                messages.dropLast(1) + ChatMessage("user", messages.last().content + if (toolContext.isNotBlank()) "\n\n$toolContext" else "")
+                val lastQuery = messages.last().content.lowercase()
+                val toolContext = StringBuilder()
+                if (lastQuery.contains("""log|error|fail|video|load|setting|where|how|device|black|broke|froze|slow|crash|die|dead|bug|stuck|lag|hang|freeze""".toRegex())) {
+                    if (aiPreferences.aiAssistantLogs().get()) {
+                        toolContext.append("\n[DIAGNOSTICS_DATA]:\n${getSanitizedLogs()}\n")
+                    }
+                }
+                if (lastQuery.contains("""library|anime|watch|collection|have|my|list|recommend""".toRegex())) {
+                    if (aiPreferences.aiAssistantLibrary().get()) {
+                        toolContext.append("\n[USER_LIBRARY_DATA]:\n${getLibrarySummary()}\n")
+                    }
+                }
+                messages.dropLast(1) + ChatMessage("user", messages.last().content + "\n\n" + toolContext.toString())
             } else {
                 messages
             }
@@ -784,14 +741,7 @@ class AiManager(
         systemInstruction: String? = null,
         withTools: Boolean = false
     ): Flow<String> = flow {
-        val contextMessages = if (withTools) {
-            val lastQuery = messages.last().content
-            val toolContext = buildToolContext(lastQuery)
-            messages.dropLast(1) + ChatMessage("user", messages.last().content + if (toolContext.isNotBlank()) "\n\n$toolContext" else "")
-        } else {
-            messages
-        }
-        val anthropicMessages = contextMessages.map { msg ->
+        val anthropicMessages = messages.map { msg ->
             AnthropicMessage(role = if (msg.role == "user") "user" else "assistant", content = msg.content)
         }
         val model = aiPreferences.anthropicModel().get().ifBlank { "claude-3-5-sonnet-20241022" }
@@ -885,9 +835,19 @@ class AiManager(
         withTools: Boolean
     ): List<GroqMessage> {
         val contextMessages = if (withTools) {
-            val lastQuery = messages.last().content
-            val toolContext = buildToolContext(lastQuery)
-            messages.dropLast(1) + ChatMessage("user", messages.last().content + if (toolContext.isNotBlank()) "\n\n$toolContext" else "")
+            val lastQuery = messages.last().content.lowercase()
+            val toolContext = StringBuilder()
+            if (lastQuery.contains("""log|error|fail|video|load|setting|where|how|device|black|broke|froze|slow|crash|die|dead|bug|stuck|lag|hang|freeze""".toRegex())) {
+                if (aiPreferences.aiAssistantLogs().get()) {
+                    toolContext.append("\n[DIAGNOSTICS_DATA]:\n${getSanitizedLogs()}\n")
+                }
+            }
+            if (lastQuery.contains("""library|anime|watch|collection|have|my|list|recommend""".toRegex())) {
+                if (aiPreferences.aiAssistantLibrary().get()) {
+                    toolContext.append("\n[USER_LIBRARY_DATA]:\n${getLibrarySummary()}\n")
+                }
+            }
+            messages.dropLast(1) + ChatMessage("user", messages.last().content + "\n\n" + toolContext.toString())
         } else {
             messages
         }
