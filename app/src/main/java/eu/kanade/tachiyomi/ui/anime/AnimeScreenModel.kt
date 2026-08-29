@@ -1890,22 +1890,25 @@ class AnimeScreenModel(
 
         val candidates = trackItems.mapNotNull { item ->
             val track = item.track ?: return@mapNotNull null
-            val tracker = item.tracker as? eu.kanade.tachiyomi.data.track.AnimeTracker
-                ?: return@mapNotNull null
+            if (item.tracker !is eu.kanade.tachiyomi.data.track.AnimeTracker) {
+                return@mapNotNull null
+            }
             if (track.remoteId <= 0L) return@mapNotNull null
-            Triple(tracker, track.remoteId, track.remoteUrl)
+            item
         }
 
-        for ((tracker, remoteId, remoteUrl) in candidates) {
-            val attemptKey = "${anime.id}:${tracker.id}:$remoteId"
+        for (item in candidates) {
+            val tracker = item.tracker as eu.kanade.tachiyomi.data.track.AnimeTracker
+            val track = item.track!!
+            val attemptKey = "${anime.id}:${item.tracker.id}:${track.remoteId}"
             val lastAttempt = castFetchAttempts[attemptKey] ?: 0L
             if (System.currentTimeMillis() - lastAttempt < CAST_RETRY_INTERVAL_MS) continue
             castFetchAttempts[attemptKey] = System.currentTimeMillis()
 
             try {
                 val cast = tracker.fetchCastByTitle(
-                    remoteId = remoteId,
-                    mediaType = if (remoteUrl.contains("/tv/", ignoreCase = true)) "tv" else "movie",
+                    remoteId = track.remoteId,
+                    mediaType = if (track.remoteUrl.contains("/tv/", ignoreCase = true)) "tv" else "movie",
                 )
                 if (!cast.isNullOrEmpty()) {
                     updateAnime.await(AnimeUpdate(id = anime.id, cast = cast))
@@ -1913,7 +1916,7 @@ class AnimeScreenModel(
                 }
             } catch (e: Exception) {
                 logcat(LogPriority.WARN, e) {
-                    "Could not fetch cast for tracked anime ${anime.id} from ${tracker.name}"
+                    "Could not fetch cast for tracked anime ${anime.id} from ${item.tracker.name}"
                 }
             }
         }
