@@ -57,6 +57,8 @@ class AiPreferences(
 
     fun aiAssistantLibrary() = preferenceStore.getBoolean("ai_assistant_library", true)
 
+    fun aiAssistantEverythingMoe() = preferenceStore.getBoolean("ai_assistant_everything_moe", true)
+
     fun aiSystemPrompt() = preferenceStore.getString("ai_system_prompt", "")
 
     // Statistics
