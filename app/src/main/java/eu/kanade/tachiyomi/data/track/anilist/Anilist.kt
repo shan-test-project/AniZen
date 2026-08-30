@@ -160,12 +160,12 @@ class Anilist(id: Long) :
     }
 
     override suspend fun update(track: Track, didWatchEpisode: Boolean): Track {
-        // If user was using API v1 fetch library_id
-        if (track.library_id == null || track.library_id!! == 0L) {
-            val libManga = api.findLibAnime(track, getUsername().toInt())
-                ?: throw Exception("$track not found on user library")
-            track.library_id = libManga.library_id
-        }
+        // Always refresh this ID. Older rows may contain an AniList media ID
+        // or a stale list-entry ID, both of which make SaveMediaListEntry fail
+        // with HTTP 400 when only the status is changed.
+        val libAnime = api.findLibAnime(track, getUsername().toInt())
+            ?: throw Exception("$track not found on user library")
+        track.library_id = libAnime.library_id
 
         if (track.status != COMPLETED) {
             if (didWatchEpisode) {
@@ -267,6 +267,15 @@ class Anilist(id: Long) :
 
     override suspend fun fetchCastByTitle(remoteId: Long, mediaType: String): List<Credit>? {
         return api.fetchCastById(remoteId)
+    }
+
+    suspend fun fetchCastForAnimeTitle(title: String): List<Credit>? {
+        val matches = api.searchAnime(title)
+        val match = matches.firstOrNull { it.title.equals(title, ignoreCase = true) }
+            ?: matches.firstOrNull()
+        return match?.remote_id
+            ?.takeIf { it > 0L }
+            ?.let { api.fetchCastById(it) }
     }
 
     fun saveOAuth(alOAuth: ALOAuth?) {

@@ -12,7 +12,7 @@ class AiPreferences(
 
     fun geminiApiKey() = preferenceStore.getString("gemini_api_key", "")
 
-    fun geminiModel() = preferenceStore.getString("gemini_model", "gemini-flash-latest")
+    fun geminiModel() = preferenceStore.getString("gemini_model", "gemini-2.5-flash")
 
     fun groqApiKey() = preferenceStore.getString("groq_api_key", "")
 
@@ -56,8 +56,6 @@ class AiPreferences(
     fun aiAssistantLogs() = preferenceStore.getBoolean("ai_assistant_logs", true)
 
     fun aiAssistantLibrary() = preferenceStore.getBoolean("ai_assistant_library", true)
-
-    fun aiAssistantEverythingMoe() = preferenceStore.getBoolean("ai_assistant_everything_moe", true)
 
     fun aiSystemPrompt() = preferenceStore.getString("ai_system_prompt", "")
 

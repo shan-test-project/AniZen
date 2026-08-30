@@ -44,6 +44,11 @@ class TrackPreferences(
 
     fun trackOnAddingToLibrary() = preferenceStore.getBoolean("track_on_adding_to_library", true)
 
+    fun cacheCharacterCardsPermanently() = preferenceStore.getBoolean(
+        "cache_character_cards_permanently",
+        true,
+    )
+
     fun showNextEpisodeAiringTime() = preferenceStore.getBoolean(
         "show_next_episode_airing_time",
         true,

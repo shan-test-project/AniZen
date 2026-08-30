@@ -39,17 +39,6 @@ class AddTracks(
 
             insertTrack.await(track)
 
-            // Fetch and persist cast data
-            try {
-                val mediaType = if (item.tracking_url.contains("/tv/")) "tv" else "movie"
-                val cast = tracker.fetchCastByTitle(item.remote_id, mediaType)
-                if (!cast.isNullOrEmpty()) {
-                    Injekt.get<eu.kanade.domain.anime.interactor.UpdateAnime>().await(
-                        tachiyomi.domain.anime.model.AnimeUpdate(id = animeId, cast = cast),
-                    )
-                }
-            } catch (_: Exception) {}
-
             // TODO: merge into [SyncEpisodeProgressWithTrack]?
             // Update episode progress if newer episodes marked seen locally
             if (hasSeenEpisodes) {

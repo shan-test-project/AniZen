@@ -32,6 +32,7 @@ import eu.kanade.presentation.anime.DownloadAction
 import eu.kanade.presentation.anime.components.EpisodeDownloadAction
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.model.Credit
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
@@ -216,12 +217,14 @@ class AnimeScreenModel(
     private val getAvailableScanlators: tachiyomi.domain.episode.interactor.GetAvailableScanlators = Injekt.get(),
 ) : StateScreenModel<AnimeScreenModel.State>(State.Loading) {
 
-    /**
-     * Cast was originally fetched only while adding a tracker. Keep a small retry
-     * window here so imported/restored tracker rows can hydrate the same data
-     * without making a request on every tracker-flow emission.
-     */
-    private val castFetchAttempts = mutableMapOf<String, Long>()
+    private data class TemporaryCast(
+        val credits: List<Credit>,
+        val expiresAt: Long,
+    )
+
+    private val castFetchAttempts = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val temporaryCastCache = java.util.concurrent.ConcurrentHashMap<Long, TemporaryCast>()
+    private val castExpiryJobs = java.util.concurrent.ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
 
     private val successState: State.Success?
         get() = state.value as? State.Success
@@ -296,8 +299,9 @@ class AnimeScreenModel(
             it.episode.lastModifiedAt + 
             (if (it.episode.seen) 1L else 0L) + 
             (if (it.selected) 2L else 0L) + 
-            (it.downloadState.hashCode().toLong() * 10L) + 
-            (it.downloadProgress.toLong() * 100L)
+            // Download state affects filters and must invalidate the list;
+            // progress only changes the visible row, not its structure.
+            (it.downloadState.hashCode().toLong() * 10L)
         }
         val episodesChanged = episodes.size != this.episodes.size || 
                              episodesStatusHash != (this as? State.Success)?.let { success -> 
@@ -305,14 +309,14 @@ class AnimeScreenModel(
                                      it.episode.lastModifiedAt + 
                                      (if (it.episode.seen) 1L else 0L) + 
                                      (if (it.selected) 2L else 0L) + 
-                                     (it.downloadState.hashCode().toLong() * 10L) + 
-                                     (it.downloadProgress.toLong() * 100L)
+                                      (it.downloadState.hashCode().toLong() * 10L)
                                  } 
                              } ?: 0L ||
                              episodes.firstOrNull()?.episode?.id != this.episodes.firstOrNull()?.episode?.id
 
         val processedEpisodes = if (anime === this.anime && !episodesChanged) {
-            this.processedEpisodes
+            val latestById = episodes.associateBy { it.id }
+            this.processedEpisodes.map { latestById[it.id] ?: it }.toImmutableList()
         } else {
             episodes.applyFilters(anime, libraryPreferences.skipDupeEpisodes().get()).toImmutableList()
         }
@@ -332,7 +336,11 @@ class AnimeScreenModel(
             processedEpisodes.size == this.processedEpisodes.size &&
             hideMissingEpisodes == this.hideMissingEpisodes
         ) {
-            Triple(this.episodeListItems, this.availableSeasons, this.episodeToSeason)
+            val latestById = processedEpisodes.associateBy { it.id }
+            val updatedItems = this.episodeListItems.map { item ->
+                if (item is EpisodeList.Item) latestById[item.id] ?: item else item
+            }.toImmutableList()
+            Triple(updatedItems, this.availableSeasons, this.episodeToSeason)
         } else {
             val items = mutableListOf<EpisodeList>()
             val seasonsList = mutableListOf<String>()
@@ -1846,23 +1854,32 @@ class AnimeScreenModel(
     private fun observeTrackers() {
         val anime = successState?.anime ?: return
         screenModelScope.launchIO {
-            combine(getTracks.subscribe(anime.id).catch { logcat(LogPriority.ERROR, it) }, trackerManager.loggedInTrackersFlow()) { animeTracks, loggedInTrackers ->
+            combine(
+                getTracks.subscribe(anime.id).catch { logcat(LogPriority.ERROR, it) },
+                trackerManager.loggedInTrackersFlow(),
+            ) { animeTracks, loggedInTrackers ->
                 val supportedTrackers = loggedInTrackers.filter { (it as? EnhancedTracker)?.accept(source!!) ?: true }
                 val supportedTrackerIds = supportedTrackers.map { it.id }.toHashSet()
                 val supportedTrackerTracks = animeTracks.filter { it.trackerId in supportedTrackerIds }
-                supportedTrackerTracks.size to supportedTrackers.isNotEmpty()
-            }.flowWithLifecycle(lifecycle).distinctUntilChanged().collectLatest { (trackingCount, hasLoggedInTrackers) ->
-                updateSuccessState { it.copySuccess(trackingCount = trackingCount, hasLoggedInTrackers = hasLoggedInTrackers) }
-            }
-        }
-        screenModelScope.launchIO {
-            combine(getTracks.subscribe(anime.id).catch { logcat(LogPriority.ERROR, it) }, trackerManager.loggedInTrackersFlow()) { animeTracks, loggedInTrackers ->
-                loggedInTrackers.map { service -> TrackItem(animeTracks.find { it.trackerId == service.id }, service) }
-            }.distinctUntilChanged().collectLatest { trackItems -> 
-                updateSuccessState { it.copySuccess(trackItems = trackItems) }
-                updateAiringTime(anime, trackItems, manualFetch = false) 
-                fetchCastForTrackedAnime(successState?.anime ?: anime, trackItems)
-                
+                val trackItems = loggedInTrackers.map { service ->
+                    TrackItem(animeTracks.find { it.trackerId == service.id }, service)
+                }
+                Triple(
+                    supportedTrackerTracks.size,
+                    supportedTrackers.isNotEmpty(),
+                    trackItems,
+                )
+            }.flowWithLifecycle(lifecycle).distinctUntilChanged().collectLatest { (trackingCount, hasLoggedInTrackers, trackItems) ->
+                updateSuccessState {
+                    it.copySuccess(
+                        trackingCount = trackingCount,
+                        hasLoggedInTrackers = hasLoggedInTrackers,
+                        trackItems = trackItems,
+                    )
+                }
+                updateAiringTime(anime, trackItems, manualFetch = false)
+                fetchCastForAnime(successState?.anime ?: anime, trackItems)
+
                 val anilistTrackItem = trackItems.find { it.tracker is eu.kanade.tachiyomi.data.track.anilist.Anilist && it.track != null }
                 if (anilistTrackItem != null) {
                     val tracker = anilistTrackItem.tracker as eu.kanade.tachiyomi.data.track.anilist.Anilist
@@ -1885,39 +1902,58 @@ class AnimeScreenModel(
         }
     }
 
-    private suspend fun fetchCastForTrackedAnime(anime: Anime, trackItems: List<TrackItem>) {
-        if (!anime.cast.isNullOrEmpty()) return
+    private suspend fun fetchCastForAnime(anime: Anime, trackItems: List<TrackItem>) {
+        val isTracked = trackItems.any { it.track != null }
+        val persistCast = isTracked && trackPreferences.cacheCharacterCardsPermanently().get()
+        val now = System.currentTimeMillis()
+        val cached = temporaryCastCache[anime.id]
 
-        val candidates = trackItems.mapNotNull { item ->
-            val track = item.track ?: return@mapNotNull null
-            if (item.tracker !is eu.kanade.tachiyomi.data.track.AnimeTracker) {
-                return@mapNotNull null
+        if (cached != null) {
+            if (cached.expiresAt > now) {
+                updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = cached.credits)) }
+                return
             }
-            if (track.remoteId <= 0L) return@mapNotNull null
-            item
+            temporaryCastCache.remove(anime.id, cached)
+            castExpiryJobs.remove(anime.id)?.cancel()
         }
 
-        for (item in candidates) {
-            val tracker = item.tracker as eu.kanade.tachiyomi.data.track.AnimeTracker
-            val track = item.track!!
-            val attemptKey = "${anime.id}:${item.tracker.id}:${track.remoteId}"
-            val lastAttempt = castFetchAttempts[attemptKey] ?: 0L
-            if (System.currentTimeMillis() - lastAttempt < CAST_RETRY_INTERVAL_MS) continue
-            castFetchAttempts[attemptKey] = System.currentTimeMillis()
+        if (persistCast && !anime.cast.isNullOrEmpty()) return
 
-            try {
-                val cast = tracker.fetchCastByTitle(
-                    remoteId = track.remoteId,
-                    mediaType = if (track.remoteUrl.contains("/tv/", ignoreCase = true)) "tv" else "movie",
-                )
-                if (!cast.isNullOrEmpty()) {
-                    updateAnime.await(AnimeUpdate(id = anime.id, cast = cast))
-                    return
+        // Cast saved by older versions must not remain permanent when the
+        // temporary-cache mode is active. An empty list is encoded as [] and
+        // therefore clears the existing database value.
+        if (!persistCast && !anime.cast.isNullOrEmpty()) {
+            updateAnime.await(AnimeUpdate(id = anime.id, cast = emptyList()))
+            updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = null)) }
+        }
+
+        val attemptKey = "${anime.id}:anilist"
+        val lastAttempt = castFetchAttempts[attemptKey] ?: 0L
+        if (now - lastAttempt < CAST_RETRY_INTERVAL_MS) return
+        castFetchAttempts[attemptKey] = now
+
+        try {
+            val cast = trackerManager.aniList.fetchCastForAnimeTitle(anime.title)
+            if (cast.isNullOrEmpty()) return
+
+            if (persistCast) {
+                updateAnime.await(AnimeUpdate(id = anime.id, cast = cast))
+            } else {
+                val expiresAt = now + CAST_RETRY_INTERVAL_MS
+                val temporary = TemporaryCast(cast, expiresAt)
+                temporaryCastCache[anime.id] = temporary
+                castExpiryJobs[anime.id]?.cancel()
+                castExpiryJobs[anime.id] = screenModelScope.launchIO {
+                    delay(CAST_RETRY_INTERVAL_MS)
+                    if (temporaryCastCache.remove(anime.id, temporary)) {
+                        updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = null)) }
+                    }
                 }
-            } catch (e: Exception) {
-                logcat(LogPriority.WARN, e) {
-                    "Could not fetch cast for tracked anime ${anime.id} from ${item.tracker.name}"
-                }
+            }
+            updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = cast)) }
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) {
+                "Could not fetch AniList cast for anime ${anime.id}"
             }
         }
     }

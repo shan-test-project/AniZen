@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -412,13 +414,6 @@ class AiManager(
         val rawKeys = apiKey.split(",").map { it.trim() }.filter { it.isNotBlank() }
         val healthyKeys = rawKeys.sortedBy { keyFailures[it] ?: 0L }
 
-        val primaryModel = aiPreferences.geminiModel().get().ifBlank { "gemini-flash-latest" }
-        val modelsToTry = if (primaryModel != "gemini-flash-lite-latest") {
-            listOf(primaryModel, "gemini-flash-lite-latest")
-        } else {
-            listOf("gemini-flash-lite-latest")
-        }
-
         val finalMessages = if (withTools) {
             val lastQuery = messages.last().content.lowercase()
             val toolContext = StringBuilder()
@@ -457,8 +452,13 @@ class AiManager(
         )
 
         var streamEmitted = false
+        var lastFailure = "No Gemini response was returned."
 
         keyLoop@ for (key in healthyKeys) {
+            val accessibleModels = fetchGeminiModels(key)
+            val primaryModel = aiPreferences.geminiModel().get().ifBlank { "gemini-2.5-flash" }
+            val modelsToTry = (listOf(primaryModel) + accessibleModels + getDefaultModelsForEngine("gemini"))
+                .distinct()
             for (model in modelsToTry) {
                 try {
                     val request = Request.Builder()
@@ -475,6 +475,8 @@ class AiManager(
                     var emittedInAttempt = false
                     timedClient.newCall(request).execute().use { response ->
                         if (!response.isSuccessful) {
+                            val errorBody = response.body.string()
+                            lastFailure = "HTTP ${response.code}: ${extractGeminiError(errorBody)}"
                             keyFailures[key] = System.currentTimeMillis()
                             return@use
                         }
@@ -486,13 +488,14 @@ class AiManager(
                                 if (data == "[DONE]") break
                                 try {
                                     val chunk = json.decodeFromString(GeminiResponse.serializer(), data)
-                                    val text = chunk.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                                    val text = chunk.candidates.firstOrNull()?.content
+                                        ?.parts?.firstOrNull()?.text
                                     if (text != null) {
                                         emit(text)
                                         emittedInAttempt = true
                                     }
                                 } catch (e: Exception) {
-                                    // Skip partial or invalid JSON
+                                    lastFailure = "Invalid Gemini response: ${e.message ?: "unknown response format"}"
                                 }
                             }
                         }
@@ -512,8 +515,39 @@ class AiManager(
             if (groqKey.isNotBlank()) {
                 callGroqStream(messages, groqKey, systemInstruction, withTools).collect { emit(it) }
             } else {
-                emit("Gemini Exception: All Gemini keys/models failed. Please check your API keys.")
+                emit("Gemini Exception: $lastFailure")
             }
+        }
+    }
+
+    private suspend fun fetchGeminiModels(apiKey: String): List<String> = withIOContext {
+        try {
+            val request = Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey")
+                .build()
+            networkHelper.client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withIOContext emptyList()
+                val parsed = json.decodeFromString(
+                    GeminiModelsListResponse.serializer(),
+                    response.body.string(),
+                )
+                parsed.models
+                    .filter { it.supportedGenerationMethods.contains("generateContent") }
+                    .map { it.name.removePrefix("models/") }
+                    .filter { it.isNotBlank() }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun extractGeminiError(body: String): String {
+        return try {
+            json.parseToJsonElement(body).jsonObject["error"]
+                ?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
+                ?: "request rejected"
+        } catch (_: Exception) {
+            "request rejected"
         }
     }
 
@@ -536,17 +570,7 @@ class AiManager(
         try {
             when (engine) {
                 "gemini" -> {
-                    val request = Request.Builder()
-                        .url("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey")
-                        .build()
-                    networkHelper.client.newCall(request).execute().use { response ->
-                        if (!response.isSuccessful) return@withIOContext getDefaultModelsForEngine(engine)
-                        val body = response.body.string()
-                        val parsed = json.decodeFromString(GeminiModelsListResponse.serializer(), body)
-                        val models = parsed.models.map { it.name.removePrefix("models/") }
-                            .filter { it.contains("gemini") }
-                        models.ifEmpty { getDefaultModelsForEngine(engine) }
-                    }
+                    fetchGeminiModels(apiKey).ifEmpty { getDefaultModelsForEngine(engine) }
                 }
                 "openai", "openrouter", "together", "groq", "deepseek", "opencode", "literouter", "tokenreply" -> {
                     val url = when (engine) {
@@ -580,7 +604,12 @@ class AiManager(
 
     private fun getDefaultModelsForEngine(engine: String): List<String> {
         return when (engine) {
-            "gemini" -> listOf("gemini-pro-latest", "gemini-flash-latest", "gemini-flash-lite-latest")
+            "gemini" -> listOf(
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-2.0-flash-lite",
+            )
             "openai" -> listOf("gpt-4o-mini", "gpt-4o", "o1-mini", "o1-preview")
             "anthropic" -> listOf("claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229")
             "openrouter" -> listOf("openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet", "deepseek/deepseek-r1")
@@ -914,10 +943,10 @@ class AiManager(
         private data class GeminiPart(val text: String)
     
         @Serializable
-        private data class GeminiResponse(val candidates: List<GeminiCandidate>)
+        private data class GeminiResponse(val candidates: List<GeminiCandidate> = emptyList())
     
         @Serializable
-        private data class GeminiCandidate(val content: GeminiContent)
+        private data class GeminiCandidate(val content: GeminiContent? = null)
     
         @Serializable
         private data class GroqRequest(
@@ -969,7 +998,10 @@ class AiManager(
         private data class GeminiModelsListResponse(val models: List<GeminiModelItem>)
 
         @Serializable
-        private data class GeminiModelItem(val name: String)
+        private data class GeminiModelItem(
+            val name: String,
+            val supportedGenerationMethods: List<String> = emptyList(),
+        )
 
         @Serializable
         private data class OpenAiModelsListResponse(val data: List<OpenAiModelItem>)

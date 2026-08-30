@@ -160,6 +160,11 @@ object SettingsTrackingScreen : SearchableSettings {
                 title = stringResource(MR.strings.pref_track_on_add_library),
             ),
             Preference.PreferenceItem.SwitchPreference(
+                pref = trackPreferences.cacheCharacterCardsPermanently(),
+                title = "Permanently cache character cards for tracked anime",
+                subtitle = "When off, character cards stay in memory for 5 minutes and are then removed",
+            ),
+            Preference.PreferenceItem.SwitchPreference(
                 pref = trackPreferences.showNextEpisodeAiringTime(),
                 title = stringResource(MR.strings.pref_show_next_episode_airing_time),
             ),

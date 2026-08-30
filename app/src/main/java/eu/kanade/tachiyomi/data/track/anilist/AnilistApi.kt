@@ -74,6 +74,9 @@ class AnilistApi(val client: OkHttpClient, interceptor: AnilistInterceptor) {
                     .awaitSuccess()
                     .parseAs<ALAddAnimeResult>()
                     .let {
+                        // AniList returns the MediaList entry ID here. Keep it
+                        // instead of leaving the local row with a media ID or 0.
+                        track.library_id = it.data.entry.id
                         track
                     }
             }
