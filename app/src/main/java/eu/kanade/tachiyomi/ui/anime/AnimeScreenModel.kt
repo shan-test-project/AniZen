@@ -217,14 +217,7 @@ class AnimeScreenModel(
     private val getAvailableScanlators: tachiyomi.domain.episode.interactor.GetAvailableScanlators = Injekt.get(),
 ) : StateScreenModel<AnimeScreenModel.State>(State.Loading) {
 
-    private data class TemporaryCast(
-        val credits: List<Credit>,
-        val expiresAt: Long,
-    )
-
     private val castFetchAttempts = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    private val temporaryCastCache = java.util.concurrent.ConcurrentHashMap<Long, TemporaryCast>()
-    private val castExpiryJobs = java.util.concurrent.ConcurrentHashMap<Long, kotlinx.coroutines.Job>()
 
     private val successState: State.Success?
         get() = state.value as? State.Success
@@ -263,7 +256,7 @@ class AnimeScreenModel(
     val showFileSize = storagePreferences.showEpisodeFileSize().get()
 
     private var fetchSuggestionsJob: kotlinx.coroutines.Job? = null
-    private val suggestionsDispatcher = kotlinx.coroutines.Dispatchers.IO
+    private val suggestionsDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(3)
 
     private fun State.Success.copySuccess(
         anime: Anime = this.anime,
@@ -690,6 +683,11 @@ class AnimeScreenModel(
                             excludedScanlators = excludedScanlators.toImmutableSet(),
                         )
                     }
+                    if (correctedAnime.cast.isNullOrEmpty()) {
+                        screenModelScope.launchIO {
+                            fetchCastForAnime(correctedAnime)
+                        }
+                    }
                     // If details were just loaded, retry suggestions
                     if (successState?.suggestionSections.isNullOrEmpty() && anime.initialized) {
                         fetchSuggestions(anime)
@@ -761,6 +759,9 @@ class AnimeScreenModel(
     internal companion object {
         // Limit to 50 anime to prevent OOM, LruCache is thread-safe
         val suggestionsCache = android.util.LruCache<Long, CachedSuggestions>(50)
+        // Keep recently loaded credits available across detail-screen instances.
+        // The database remains the source of truth for longer-lived reuse.
+        val castCache = android.util.LruCache<Long, List<Credit>>(100)
         private const val CACHE_TTL = 60 * 60 * 1000L // 1 hour
         private const val CAST_RETRY_INTERVAL_MS = 5 * 60 * 1000L
 
@@ -872,11 +873,17 @@ class AnimeScreenModel(
                 suspend fun updateSection(type: SuggestionSection.Type, items: List<Anime>) {
                     sectionMutex.withLock {
                         val currentSuccess = successState ?: return
+                        // Recommendations must not wait indefinitely for a large
+                        // library query. Ranking without the optional library
+                        // context is still useful and lets the first section render.
+                        val library = kotlinx.coroutines.withTimeoutOrNull(400L) {
+                            libraryDeferred.await()
+                        }.orEmpty()
                         val rankedItems = rankAndSortItems(
                             items = items,
                             currentAnime = currentSuccess.anime,
                             type = type,
-                            library = libraryDeferred.await(),
+                            library = library,
                         ).toImmutableList()
 
                         updateSuccessState { state ->
@@ -897,7 +904,7 @@ class AnimeScreenModel(
                 // Discovery Load
                 // Recommendations are supplementary content; never hold the screen in a
                 // loading state longer than the source itself is useful.
-                kotlinx.coroutines.withTimeoutOrNull(8000L) {
+                kotlinx.coroutines.withTimeoutOrNull(5000L) {
                     kotlinx.coroutines.coroutineScope {
                         // 0. Franchise & Sequels (Strict Verification)
                         launch {
@@ -1877,8 +1884,12 @@ class AnimeScreenModel(
                         trackItems = trackItems,
                     )
                 }
+                // Character data is independent of tracker airing data. Start it
+                // immediately so a slow tracker cannot block the first card render.
+                screenModelScope.launchIO {
+                    fetchCastForAnime(successState?.anime ?: anime)
+                }
                 updateAiringTime(anime, trackItems, manualFetch = false)
-                fetchCastForAnime(successState?.anime ?: anime, trackItems)
 
                 val anilistTrackItem = trackItems.find { it.tracker is eu.kanade.tachiyomi.data.track.anilist.Anilist && it.track != null }
                 if (anilistTrackItem != null) {
@@ -1902,31 +1913,22 @@ class AnimeScreenModel(
         }
     }
 
-    private suspend fun fetchCastForAnime(anime: Anime, trackItems: List<TrackItem>) {
-        val isTracked = trackItems.any { it.track != null }
-        val persistCast = isTracked && trackPreferences.cacheCharacterCardsPermanently().get()
+    private suspend fun fetchCastForAnime(anime: Anime) {
+        // Credits are metadata, not tracking data. Keep them in the database
+        // cache for tracked and non-tracked anime so reopening a details screen
+        // never needs to repeat the network request.
+        val existingCast = anime.cast?.takeIf { it.isNotEmpty() }
+        if (existingCast != null) {
+            castCache.put(anime.id, existingCast)
+            return
+        }
+
+        castCache.get(anime.id)?.let { cached ->
+            updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = cached)) }
+            return
+        }
+
         val now = System.currentTimeMillis()
-        val cached = temporaryCastCache[anime.id]
-
-        if (cached != null) {
-            if (cached.expiresAt > now) {
-                updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = cached.credits)) }
-                return
-            }
-            temporaryCastCache.remove(anime.id, cached)
-            castExpiryJobs.remove(anime.id)?.cancel()
-        }
-
-        if (persistCast && !anime.cast.isNullOrEmpty()) return
-
-        // Cast saved by older versions must not remain permanent when the
-        // temporary-cache mode is active. An empty list is encoded as [] and
-        // therefore clears the existing database value.
-        if (!persistCast && !anime.cast.isNullOrEmpty()) {
-            updateAnime.await(AnimeUpdate(id = anime.id, cast = emptyList()))
-            updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = null)) }
-        }
-
         val attemptKey = "${anime.id}:anilist"
         val lastAttempt = castFetchAttempts[attemptKey] ?: 0L
         if (now - lastAttempt < CAST_RETRY_INTERVAL_MS) return
@@ -1936,20 +1938,8 @@ class AnimeScreenModel(
             val cast = trackerManager.aniList.fetchCastForAnimeTitle(anime.title)
             if (cast.isNullOrEmpty()) return
 
-            if (persistCast) {
-                updateAnime.await(AnimeUpdate(id = anime.id, cast = cast))
-            } else {
-                val expiresAt = now + CAST_RETRY_INTERVAL_MS
-                val temporary = TemporaryCast(cast, expiresAt)
-                temporaryCastCache[anime.id] = temporary
-                castExpiryJobs[anime.id]?.cancel()
-                castExpiryJobs[anime.id] = screenModelScope.launchIO {
-                    delay(CAST_RETRY_INTERVAL_MS)
-                    if (temporaryCastCache.remove(anime.id, temporary)) {
-                        updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = null)) }
-                    }
-                }
-            }
+            castCache.put(anime.id, cast)
+            updateAnime.await(AnimeUpdate(id = anime.id, cast = cast))
             updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = cast)) }
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) {

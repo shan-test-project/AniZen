@@ -1,19 +1,10 @@
 package eu.kanade.presentation.anime.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,16 +26,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,21 +59,9 @@ fun CastRow(
         items(cast.size, key = { it }) { idx ->
             val credit = cast[idx]
             val interactionSource = remember { MutableInteractionSource() }
-            val isPressed by interactionSource.collectIsPressedAsState()
-            val scale by animateFloatAsState(
-                targetValue = if (isPressed) 0.95f else 1f,
-                animationSpec = tween(durationMillis = 150),
-                label = "scale",
-            )
-            val elevation by animateDpAsState(
-                targetValue = if (isPressed) 8.dp else 4.dp,
-                animationSpec = tween(durationMillis = 150),
-                label = "elevation",
-            )
-
             Card(
                 elevation = CardDefaults.cardElevation(
-                    defaultElevation = elevation,
+                    defaultElevation = 2.dp,
                 ),
                 shape = RoundedCornerShape(
                     topStart = 16.dp,
@@ -99,8 +75,6 @@ fun CastRow(
                 modifier = Modifier
                     .width(100.dp)
                     .height(160.dp)
-                    .scale(scale)
-                    .animateItem()
                     .border(
                         width = 1.5.dp,
                         brush = Brush.sweepGradient(
@@ -153,18 +127,18 @@ fun CastRow(
 
                     val ctx = LocalContext.current
                     if (!credit.image_url.isNullOrBlank()) {
-                        val request = ImageRequest.Builder(ctx)
-                            .data(credit.image_url)
-                            .crossfade(true)
-                            .build()
+                        val request = remember(credit.image_url) {
+                            ImageRequest.Builder(ctx)
+                                .data(credit.image_url)
+                                .crossfade(false)
+                                .build()
+                        }
 
                         SubcomposeAsyncImage(
                             model = request,
                             contentDescription = credit.name,
                             modifier = imageModifier,
-                            loading = {
-                                ShimmerPlaceholder(modifier = imageModifier)
-                            },
+                            loading = { PersonPlaceholder(modifier = imageModifier) },
                             error = {
                                 PersonPlaceholder(modifier = imageModifier)
                             },
@@ -231,35 +205,5 @@ private fun PersonPlaceholder(modifier: Modifier = Modifier) {
                 ),
             ),
         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-    )
-}
-
-@Composable
-private fun ShimmerPlaceholder(modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "shimmer")
-    val translateAnim by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1000f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "shimmer_translate",
-    )
-
-    val shimmerBrush = Brush.linearGradient(
-        colors = listOf(
-            Color.LightGray.copy(alpha = 0.6f),
-            Color.LightGray.copy(alpha = 0.2f),
-            Color.LightGray.copy(alpha = 0.6f),
-        ),
-        start = Offset.Zero,
-        end = Offset(x = translateAnim, y = translateAnim),
-        tileMode = TileMode.Mirror,
-    )
-
-    Box(
-        modifier = modifier
-            .background(shimmerBrush),
     )
 }

@@ -39,6 +39,7 @@ class AiManager(
 ) {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val keyFailures = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private var staleRequestStateRecovered = false
 
     // Circuit Breaker Config
     private val MAP_VERSION = 132
@@ -59,10 +60,9 @@ class AiManager(
         if (!aiPreferences.enableAi().get() || !aiPreferences.enableAiAssistant().get()) return@flow
 
         // A request can leave these preferences set when Android kills the
-        // process while the provider is streaming. That state is stale by the
-        // time a new flow is created and must not lock the assistant forever.
+        // process while the provider is streaming. Recover that state once for
+        // this manager instance so it cannot lock the assistant forever.
         recoverInterruptedRequestState()
-
         if (isRemoteKillSwitchActive()) {
             emit("Service Maintenance: AI Assistant is currently offline.")
             return@flow
@@ -149,7 +149,6 @@ class AiManager(
         if (!aiPreferences.enableAi().get() || !aiPreferences.enableAiStatistics().get()) return@flow
 
         recoverInterruptedRequestState()
-
         val engine = aiPreferences.aiEngine().get()
         val apiKey = when (engine) {
             "gemini" -> aiPreferences.geminiApiKey().get()
@@ -199,7 +198,27 @@ class AiManager(
         }
     }
 
+    private suspend fun isRemoteKillSwitchActive(): Boolean = withIOContext {
+        try {
+            val request = Request.Builder().url(REMOTE_KILL_SWITCH_URL).build()
+            val client = networkHelper.client.newBuilder()
+                .callTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            client.newCall(request).execute().use {
+                if (it.isSuccessful) {
+                    val body = it.body.string()
+                    body.contains("\"disabled\": true")
+                } else false
+            }
+        } catch (e: Exception) {
+            false // Default to enabled if network fails
+        }
+    }
+
+    @Synchronized
     private fun recoverInterruptedRequestState() {
+        if (staleRequestStateRecovered) return
+        staleRequestStateRecovered = true
         if (aiPreferences.isRequestPending().get() || aiPreferences.isCircuitBreakerTripped().get()) {
             logcat(LogPriority.WARN) {
                 "Clearing stale AI request state from an interrupted provider request"
@@ -209,18 +228,31 @@ class AiManager(
         }
     }
 
-    private suspend fun isRemoteKillSwitchActive(): Boolean = withIOContext {
-        try {
-            val request = Request.Builder().url(REMOTE_KILL_SWITCH_URL).build()
-            networkHelper.client.newCall(request).execute().use {
-                if (it.isSuccessful) {
-                    val body = it.body.string()
-                    body.contains("\"disabled\": true")
-                } else false
+    /**
+     * Build the same grounded context for every provider. Previously Gemini
+     * and the OpenAI-compatible providers each had a different copy of this
+     * logic, while Anthropic silently ignored it.
+     */
+    private suspend fun buildToolContext(lastQuery: String): String {
+        val queryLower = lastQuery.lowercase()
+        val toolContext = StringBuilder()
+        val diagnosticQuery = """log|error|fail|video|load|setting|where|how|device|black|broke|froze|slow|crash|die|dead|bug|stuck|lag|hang|freeze""".toRegex()
+        val libraryQuery = """library|anime|watch|collection|have|my|list|recommend""".toRegex()
+
+        if (queryLower.contains(diagnosticQuery)) {
+            if (aiPreferences.aiAssistantLogs().get()) {
+                toolContext.append("\n[DIAGNOSTICS_DATA]:\n${getSanitizedLogs()}\n")
             }
-        } catch (e: Exception) {
-            false // Default to enabled if network fails
+            toolContext.append("\n[NAVIGATION_MAP]:\n${getAppMap()}\n")
+            toolContext.append("\n[EXTENSIONS_STATUS]:\n${getExtensionStatusSummary()}\n")
+            toolContext.append("\n[ENVIRONMENT]: ${getDeviceInfo()}\n")
         }
+
+        if (queryLower.contains(libraryQuery) && aiPreferences.aiAssistantLibrary().get()) {
+            toolContext.append("\n[USER_LIBRARY_DATA]:\n${getLibrarySummary()}\n")
+        }
+
+        return toolContext.toString().trim()
     }
 
     private fun recordRequestSuccess() {
@@ -415,24 +447,11 @@ class AiManager(
         val healthyKeys = rawKeys.sortedBy { keyFailures[it] ?: 0L }
 
         val finalMessages = if (withTools) {
-            val lastQuery = messages.last().content.lowercase()
-            val toolContext = StringBuilder()
-            
-            if (lastQuery.contains("""log|error|fail|video|load|setting|where|how|device|black|broke|froze|slow|crash|die|dead|bug|stuck|lag|hang|freeze""".toRegex())) {
-                if (aiPreferences.aiAssistantLogs().get()) {
-                    toolContext.append("\n[DIAGNOSTICS_DATA]:\n${getSanitizedLogs()}\n")
-                }
-                toolContext.append("\n[NAVIGATION_MAP]:\n${getAppMap()}\n")
-                toolContext.append("\n[EXTENSIONS_STATUS]:\n${getExtensionStatusSummary()}\n")
-                toolContext.append("\n[ENVIRONMENT]: ${getDeviceInfo()}\n")
-            }
-
-            if (lastQuery.contains("""library|anime|watch|collection|have|my|list|recommend""".toRegex())) {
-                if (aiPreferences.aiAssistantLibrary().get()) {
-                    toolContext.append("\n[USER_LIBRARY_DATA]:\n${getLibrarySummary()}\n")
-                }
-            }
-            messages.dropLast(1) + ChatMessage("user", messages.last().content + "\n\n" + toolContext.toString())
+            val toolContext = buildToolContext(messages.last().content)
+            messages.dropLast(1) + ChatMessage(
+                "user",
+                messages.last().content + if (toolContext.isNotBlank()) "\n\n$toolContext" else "",
+            )
         } else {
             messages
         }
@@ -770,7 +789,16 @@ class AiManager(
         systemInstruction: String? = null,
         withTools: Boolean = false
     ): Flow<String> = flow {
-        val anthropicMessages = messages.map { msg ->
+        val finalMessages = if (withTools) {
+            val toolContext = buildToolContext(messages.last().content)
+            messages.dropLast(1) + ChatMessage(
+                "user",
+                messages.last().content + if (toolContext.isNotBlank()) "\n\n$toolContext" else "",
+            )
+        } else {
+            messages
+        }
+        val anthropicMessages = finalMessages.map { msg ->
             AnthropicMessage(role = if (msg.role == "user") "user" else "assistant", content = msg.content)
         }
         val model = aiPreferences.anthropicModel().get().ifBlank { "claude-3-5-sonnet-20241022" }
@@ -864,19 +892,11 @@ class AiManager(
         withTools: Boolean
     ): List<GroqMessage> {
         val contextMessages = if (withTools) {
-            val lastQuery = messages.last().content.lowercase()
-            val toolContext = StringBuilder()
-            if (lastQuery.contains("""log|error|fail|video|load|setting|where|how|device|black|broke|froze|slow|crash|die|dead|bug|stuck|lag|hang|freeze""".toRegex())) {
-                if (aiPreferences.aiAssistantLogs().get()) {
-                    toolContext.append("\n[DIAGNOSTICS_DATA]:\n${getSanitizedLogs()}\n")
-                }
-            }
-            if (lastQuery.contains("""library|anime|watch|collection|have|my|list|recommend""".toRegex())) {
-                if (aiPreferences.aiAssistantLibrary().get()) {
-                    toolContext.append("\n[USER_LIBRARY_DATA]:\n${getLibrarySummary()}\n")
-                }
-            }
-            messages.dropLast(1) + ChatMessage("user", messages.last().content + "\n\n" + toolContext.toString())
+            val toolContext = buildToolContext(messages.last().content)
+            messages.dropLast(1) + ChatMessage(
+                "user",
+                messages.last().content + if (toolContext.isNotBlank()) "\n\n$toolContext" else "",
+            )
         } else {
             messages
         }
