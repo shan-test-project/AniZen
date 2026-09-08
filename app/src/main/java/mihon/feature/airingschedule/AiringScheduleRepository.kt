@@ -45,19 +45,29 @@ class AiringScheduleRepository {
         includeAdult: Boolean = false,
     ): List<AiringScheduleEntry> {
         return withIOContext {
-            try {
+            var aniListError: Exception? = null
+            val aniListEntries = try {
                 getAniListWeeklySchedule(weekStart, weekEnd, includeAdult)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (aniListError: Exception) {
-                try {
-                    liveChartRepository.getWeeklySchedule(weekStart, weekEnd)
-                } catch (liveChartError: kotlinx.coroutines.CancellationException) {
-                    throw liveChartError
-                } catch (liveChartError: Exception) {
-                    aniListError.addSuppressed(liveChartError)
-                    throw aniListError
+            } catch (e: Exception) {
+                aniListError = e
+                null
+            }
+
+            try {
+                // An empty successful response is not useful schedule data. Treat it like an
+                // unavailable primary source, while keeping AniList primary for normal results.
+                aniListEntries?.takeIf { it.isNotEmpty() }
+                    ?: liveChartRepository.getWeeklySchedule(weekStart, weekEnd)
+            } catch (liveChartError: kotlinx.coroutines.CancellationException) {
+                throw liveChartError
+            } catch (liveChartError: Exception) {
+                aniListError?.let { error ->
+                    error.addSuppressed(liveChartError)
+                    throw error
                 }
+                throw liveChartError
             }
         }
     }

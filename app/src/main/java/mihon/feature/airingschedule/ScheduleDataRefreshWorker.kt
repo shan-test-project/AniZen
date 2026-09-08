@@ -51,7 +51,7 @@ class ScheduleDataRefreshWorker(
             val now = ZonedDateTime.now(zone)
             val weekStart = now.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
                 .toLocalDate().atStartOfDay(zone)
-            val weekEnd = weekStart.plusDays(7).minusSeconds(1)
+            val weekEnd = weekStart.plusDays(7)
 
             val entries = repository.getWeeklySchedule(
                 weekStart.toEpochSecond(),
@@ -135,7 +135,8 @@ class ScheduleDataRefreshWorker(
             try {
                 val file = context.cacheFile()
                 if (!file.exists()) return@withContext null
-                cacheJson.decodeFromString(ScheduleCacheData.serializer(), file.readText())
+                val cache = cacheJson.decodeFromString(ScheduleCacheData.serializer(), file.readText())
+                cache.takeIf { it.cacheVersion == ScheduleCacheData.CURRENT_VERSION }
             } catch (_: Exception) {
                 null
             }
@@ -151,6 +152,7 @@ class ScheduleDataRefreshWorker(
                 if (entries.isEmpty()) return@withContext
                 try {
                     val cacheData = ScheduleCacheData(
+                        cacheVersion = ScheduleCacheData.CURRENT_VERSION,
                         fetchedAt = System.currentTimeMillis(),
                         weekStartEpoch = weekStartEpoch,
                         entries = entries,
@@ -245,7 +247,13 @@ class ScheduleDataRefreshWorker(
 
 @Serializable
 data class ScheduleCacheData(
+    // Bump when schedule/title matching semantics change so stale entries cannot mask fixes.
+    val cacheVersion: Int? = null,
     val fetchedAt: Long,
     val weekStartEpoch: Long,
     val entries: List<AiringScheduleEntry>,
-)
+) {
+    companion object {
+        const val CURRENT_VERSION = 2
+    }
+}

@@ -76,7 +76,7 @@ class ScheduleRefreshWorker(
         val weekStart = now.minusDays(2)
             .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
             .toLocalDate().atStartOfDay(zone)
-        val weekEnd = weekStart.plusDays(7).minusSeconds(1)
+        val weekEnd = weekStart.plusDays(7)
         val entries = AiringScheduleRepository().getWeeklySchedule(
             weekStart.toEpochSecond(),
             weekEnd.toEpochSecond(),

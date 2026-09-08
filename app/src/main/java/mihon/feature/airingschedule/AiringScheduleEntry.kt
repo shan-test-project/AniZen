@@ -21,10 +21,30 @@ data class AiringScheduleEntry(
     val genres: List<String> = emptyList(),
 ) {
     fun displayTitle(language: SchedulePreferences.TitleLanguage): String = when (language) {
-        SchedulePreferences.TitleLanguage.ENGLISH -> titleEnglish?.takeIf { it.isNotBlank() } ?: titleRomaji?.takeIf { it.isNotBlank() } ?: titleUserPreferred
-        SchedulePreferences.TitleLanguage.ROMAJI -> titleRomaji?.takeIf { it.isNotBlank() } ?: titleUserPreferred
-        SchedulePreferences.TitleLanguage.NATIVE -> titleNative?.takeIf { it.isNotBlank() } ?: titleUserPreferred
-        SchedulePreferences.TitleLanguage.USER_PREFERRED -> titleUserPreferred
+        SchedulePreferences.TitleLanguage.ENGLISH ->
+            titleEnglish?.takeIf { it.isNotBlank() }
+                ?: titleUserPreferred.takeIf { it.isNotBlank() }
+                ?: titleRomaji?.takeIf { it.isNotBlank() }
+                ?: titleNative?.takeIf { it.isNotBlank() }
+                .orEmpty()
+        SchedulePreferences.TitleLanguage.ROMAJI ->
+            titleRomaji?.takeIf { it.isNotBlank() }
+                ?: titleUserPreferred.takeIf { it.isNotBlank() }
+                ?: titleEnglish?.takeIf { it.isNotBlank() }
+                ?: titleNative?.takeIf { it.isNotBlank() }
+                .orEmpty()
+        SchedulePreferences.TitleLanguage.NATIVE ->
+            titleNative?.takeIf { it.isNotBlank() }
+                ?: titleUserPreferred.takeIf { it.isNotBlank() }
+                ?: titleEnglish?.takeIf { it.isNotBlank() }
+                ?: titleRomaji?.takeIf { it.isNotBlank() }
+                .orEmpty()
+        SchedulePreferences.TitleLanguage.USER_PREFERRED ->
+            titleUserPreferred.takeIf { it.isNotBlank() }
+                ?: titleEnglish?.takeIf { it.isNotBlank() }
+                ?: titleRomaji?.takeIf { it.isNotBlank() }
+                ?: titleNative?.takeIf { it.isNotBlank() }
+                .orEmpty()
     }
 
     fun hasAired(): Boolean = airingAt <= System.currentTimeMillis() / 1000L

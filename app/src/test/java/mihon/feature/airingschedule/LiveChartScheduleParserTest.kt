@@ -34,6 +34,7 @@ class LiveChartScheduleParserTest {
                 episode = 12,
                 mediaId = -123,
                 titleUserPreferred = "Example Anime",
+                titleEnglish = "Example Anime",
                 titleRomaji = "Example Anime",
                 coverImageUrl = "https://www.livechart.me/posters/example.jpg",
                 totalEpisodes = 24,
@@ -73,5 +74,23 @@ class LiveChartScheduleParserTest {
         assertEquals("Movie Event", entries.single().titleUserPreferred)
         assertEquals(0, entries.single().episode)
         assertTrue(entries.single().mediaId < 0)
+    }
+
+    @Test
+    fun `excludes the exclusive next-week boundary`() {
+        val entries = LiveChartScheduleParser.parse(
+            html = """
+                <div class="lc-timetable-anime-block"
+                    data-schedule-anime-id="1"
+                    data-schedule-anime-title="Next Week"
+                    data-schedule-anime-release-date-value="2000">
+                    <a class="lc-tt-release-label" href="/anime/1/schedules/10">EP1</a>
+                </div>
+            """.trimIndent(),
+            weekStart = 1000,
+            weekEnd = 2000,
+        )
+
+        assertTrue(entries.isEmpty())
     }
 }

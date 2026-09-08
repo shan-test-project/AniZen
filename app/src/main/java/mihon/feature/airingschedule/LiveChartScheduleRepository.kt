@@ -99,7 +99,10 @@ internal object LiveChartScheduleParser {
                     .attr("data-schedule-anime-release-date-value")
                     .toLongOrNull()
                     ?: return@mapNotNull null
-                if (airingAt !in weekStart..weekEnd) return@mapNotNull null
+                // [weekStart, weekEnd) matches AniList's airingAt_greater/airingAt_lesser
+                // range and prevents an event exactly at next Monday midnight from leaking
+                // into the previous week.
+                if (airingAt < weekStart || airingAt >= weekEnd) return@mapNotNull null
 
                 val title = element
                     .attr("data-schedule-anime-title")
@@ -142,6 +145,10 @@ internal object LiveChartScheduleParser {
                     episode = episode,
                     mediaId = -liveChartAnimeId,
                     titleUserPreferred = title,
+                    // LiveChart exposes one preferred display title rather than AniList's
+                    // three title fields. Treat that value as the available title for every
+                    // language choice instead of silently forcing the Romaji branch.
+                    titleEnglish = title,
                     titleRomaji = title,
                     coverImageUrl = coverImageUrl,
                     totalEpisodes = totalEpisodes,

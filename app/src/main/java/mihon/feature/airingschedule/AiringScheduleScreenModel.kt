@@ -33,6 +33,7 @@ class AiringScheduleScreenModel(
 
     private var allEntries: List<AiringScheduleEntry> = emptyList()
     private var hasLoaded = false
+    private var lastTitleLanguage = schedulePrefs.titleLanguage().get()
 
     init {
         loadSchedule()
@@ -49,8 +50,13 @@ class AiringScheduleScreenModel(
                     val idByTitle = mutableMapOf<String, Long>()
 
                     for (lib in libraryAnime) {
-                        val animeTitle = lib.anime.title
-                        val keys = mihon.feature.airingschedule.util.ScheduleTitleMatcher.normalizedKeys(animeTitle)
+                        // Match both the user's custom/display title and the original source
+                        // title. A custom title alone can hide a library item whose schedule
+                        // entry uses the source's English or Romaji title.
+                        val libraryTitles = listOf(lib.anime.title, lib.anime.ogTitle).distinct()
+                        val keys = libraryTitles
+                            .flatMap { mihon.feature.airingschedule.util.ScheduleTitleMatcher.normalizedKeys(it) }
+                            .toSet()
                         titles.addAll(keys)
                         val sourceStr = lib.anime.source.toString()
                         for (k in keys) {
@@ -88,7 +94,13 @@ class AiringScheduleScreenModel(
                 schedulePrefs.sourceUploadDelays().changes(),
                 schedulePrefs.viewMode().changes(),
             ) { _ -> Unit }.collectLatest {
-                if (allEntries.isNotEmpty()) {
+                val titleLanguage = schedulePrefs.titleLanguage().get()
+                if (titleLanguage != lastTitleLanguage) {
+                    // Re-fetch after a language change so an older cached payload cannot keep
+                    // displaying AniList's userPreferred/Romaji title.
+                    lastTitleLanguage = titleLanguage
+                    loadSchedule(forceRefresh = true)
+                } else if (allEntries.isNotEmpty()) {
                     applyFilters()
                 }
             }
@@ -101,7 +113,10 @@ class AiringScheduleScreenModel(
             val now = ZonedDateTime.now(zone)
             val weekStart = now.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
                 .toLocalDate().atStartOfDay(zone)
-            val weekEnd = weekStart.plusDays(7).minusSeconds(1)
+            // Keep the API range exclusive at the next Monday boundary. The visible label still
+            // ends on Sunday, so no airing is lost or assigned to the wrong week.
+            val weekEndExclusive = weekStart.plusDays(7)
+            val visibleWeekEnd = weekEndExclusive.minusDays(1).toLocalDate()
             val currentWeekStart = weekStart.toEpochSecond()
 
             // 1. Try reading disk cache first (Instant Offline Display, no blank screen)
@@ -119,7 +134,7 @@ class AiringScheduleScreenModel(
                     entries = allEntries,
                     delays = if (schedulePrefs.uploadDelayEnabled().get()) uploadDelayTracker.getDelays() else emptyMap(),
                     weekStart = weekStart.toLocalDate(),
-                    weekEnd = weekEnd.toLocalDate(),
+                    weekEnd = visibleWeekEnd,
                 )
                 // If cache is for the current week and was fetched within the last 12 hours, skip network fetch
                 val cacheAge = System.currentTimeMillis() - (cache?.fetchedAt ?: 0L)
@@ -138,7 +153,7 @@ class AiringScheduleScreenModel(
                 val includeAdult = schedulePrefs.showAdultContent().get()
                 val fetched = repository.getWeeklySchedule(
                     weekStart.toEpochSecond(),
-                    weekEnd.toEpochSecond(),
+                    weekEndExclusive.toEpochSecond(),
                     includeAdult = includeAdult,
                 )
 
@@ -160,7 +175,7 @@ class AiringScheduleScreenModel(
                     entries = allEntries,
                     delays = delays,
                     weekStart = weekStart.toLocalDate(),
-                    weekEnd = weekEnd.toLocalDate(),
+                    weekEnd = visibleWeekEnd,
                 )
             } catch (e: Exception) {
                 if (allEntries.isEmpty()) {
@@ -173,7 +188,7 @@ class AiringScheduleScreenModel(
                             entries = allEntries,
                             delays = if (schedulePrefs.uploadDelayEnabled().get()) uploadDelayTracker.getDelays() else emptyMap(),
                             weekStart = weekStart.toLocalDate(),
-                            weekEnd = weekEnd.toLocalDate(),
+                            weekEnd = visibleWeekEnd,
                         )
                     } else {
                         mutableState.update { it.copy(isLoading = false, error = e.message) }
