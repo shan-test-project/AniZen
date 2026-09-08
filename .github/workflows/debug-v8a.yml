@@ -44,13 +44,21 @@ jobs:
         run: |
           VERSION="${{ env.VERSION }}"
           mkdir -p dist
-          find app/build/outputs/apk/r8Debug -type f -name "*.apk" -exec cp {} "dist/AniZen-v${VERSION}-v8a-r8-debug.apk" \;
           APK="dist/AniZen-v${VERSION}-v8a-r8-debug.apk"
+          mapfile -t APKS < <(find app/build/outputs/apk/r8Debug -type f -name "*.apk" | sort)
+          test "${#APKS[@]}" -gt 0
+          printf 'Generated APKs:\n'
+          for candidate in "${APKS[@]}"; do
+            printf '  %s (%s bytes)\n' "$candidate" "$(stat -c%s "$candidate")"
+          done
+          SOURCE_APK=$(find app/build/outputs/apk/r8Debug -type f -name "*arm64-v8a*.apk" | head -1)
+          test -n "$SOURCE_APK"
+          cp "$SOURCE_APK" "$APK"
           test -s "$APK"
           SIZE_BYTES=$(stat -c%s "$APK")
           SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
           echo "APK size: ${SIZE_MB} MiB (${SIZE_BYTES} bytes)"
-          if [ "$SIZE_MB" -gt 80 ]; then
+          if [ "$SIZE_BYTES" -gt $((80 * 1024 * 1024)) ]; then
             echo "The optimized APK exceeds the expected size ceiling." >&2
             exit 1
           fi
