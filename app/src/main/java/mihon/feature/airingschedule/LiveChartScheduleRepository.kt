@@ -4,13 +4,8 @@ import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.await
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.sync.withPermit
 import okhttp3.Request
 import org.jsoup.Jsoup
 import uy.kohesive.injekt.injectLazy
@@ -31,11 +26,17 @@ class LiveChartScheduleRepository {
     suspend fun getWeeklySchedule(
         weekStart: Long,
         weekEnd: Long,
+        titleLanguage: SchedulePreferences.TitleLanguage = SchedulePreferences.TitleLanguage.ROMAJI,
     ): List<AiringScheduleEntry> {
         rateLimit()
 
+        val scheduleDate = java.time.Instant.ofEpochSecond(weekStart)
+            .atZone(java.time.ZoneId.systemDefault())
+            .toLocalDate()
         val request = Request.Builder()
-            .url(SCHEDULE_URL)
+            .url(
+                "$SCHEDULE_URL?date=$scheduleDate&titles=${titleLanguage.liveChartValue()}",
+            )
             .header("Accept", "text/html,application/xhtml+xml")
             .header("Accept-Language", "en-US,en;q=0.8")
             .header("Referer", "https://www.livechart.me/")
@@ -58,76 +59,7 @@ class LiveChartScheduleRepository {
             if (entries.isEmpty()) {
                 throw IOException("LiveChart schedule returned no parseable entries")
             }
-            return enrichWithEnglishTitles(entries)
-        }
-    }
-
-    private suspend fun enrichWithEnglishTitles(
-        entries: List<AiringScheduleEntry>,
-    ): List<AiringScheduleEntry> = coroutineScope {
-        val semaphore = Semaphore(ENGLISH_TITLE_CONCURRENCY)
-        entries.map { entry ->
-            async {
-                val originalTitles = (
-                    entry.titleAliases +
-                        listOfNotNull(
-                            entry.titleUserPreferred,
-                            entry.titleEnglish,
-                            entry.titleRomaji,
-                            entry.titleNative,
-                        )
-                    ).distinct()
-                val englishTitle = semaphore.withPermit {
-                    fetchEnglishTitle(-entry.mediaId)
-                } ?: entry.titleUserPreferred
-
-                entry.copy(
-                    titleUserPreferred = englishTitle,
-                    titleEnglish = englishTitle,
-                    titleRomaji = englishTitle,
-                    titleNative = englishTitle,
-                    titleAliases = (originalTitles + englishTitle).distinct(),
-                )
-            }
-        }.awaitAll()
-    }
-
-    private suspend fun fetchEnglishTitle(liveChartAnimeId: Int): String? {
-        if (liveChartAnimeId <= 0) return null
-        titleRateLimit()
-
-        val request = Request.Builder()
-            .url("https://www.livechart.me/anime/$liveChartAnimeId")
-            .header("Accept", "text/html,application/xhtml+xml")
-            .header("Accept-Language", "en-US,en;q=0.8")
-            .header("Referer", SCHEDULE_URL)
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-            )
-            .build()
-
-        return try {
-            val response = client.newCall(request).await()
-            response.use { response ->
-                if (!response.isSuccessful) return null
-                val document = Jsoup.parse(response.body.string(), "https://www.livechart.me/")
-                document
-                    .selectFirst("[data-anime-details-english-title]")
-                    ?.attr("data-anime-details-english-title")
-                    ?.trim()
-                    ?.takeIf { it.isNotBlank() }
-                    ?: document
-                        .selectFirst("[data-anime-details-non-preferred-title]")
-                        ?.attr("data-anime-details-non-preferred-title")
-                        ?.trim()
-                        ?.takeIf { it.isNotBlank() }
-            }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            null
+            return entries
         }
     }
 
@@ -141,27 +73,22 @@ class LiveChartScheduleRepository {
         }
     }
 
-    private suspend fun titleRateLimit() {
-        titleRequestMutex.withLock {
-            val elapsed = System.currentTimeMillis() - lastTitleRequestAt
-            if (elapsed < MIN_TITLE_REQUEST_INTERVAL_MS) {
-                delay(MIN_TITLE_REQUEST_INTERVAL_MS - elapsed)
-            }
-            lastTitleRequestAt = System.currentTimeMillis()
-        }
-    }
-
     companion object {
-        private const val SCHEDULE_URL =
-            "https://www.livechart.me/schedule/all?sortby=airdate&layout=full"
+        private const val SCHEDULE_URL = "https://www.livechart.me/schedule"
         private const val MIN_REQUEST_INTERVAL_MS = 5_000L
-        private const val MIN_TITLE_REQUEST_INTERVAL_MS = 250L
-        private const val ENGLISH_TITLE_CONCURRENCY = 4
         private val requestMutex = Mutex()
-        private val titleRequestMutex = Mutex()
         private var lastRequestAt = 0L
-        private var lastTitleRequestAt = 0L
     }
+}
+
+internal fun SchedulePreferences.TitleLanguage.liveChartValue(): String = when (this) {
+    SchedulePreferences.TitleLanguage.ENGLISH -> "english"
+    // LiveChart exposes Romaji and English. Romaji is its preferred-title default and is the
+    // closest available representation for User Preferred and Native.
+    SchedulePreferences.TitleLanguage.USER_PREFERRED,
+    SchedulePreferences.TitleLanguage.ROMAJI,
+    SchedulePreferences.TitleLanguage.NATIVE,
+    -> "romaji"
 }
 
 internal object LiveChartScheduleParser {

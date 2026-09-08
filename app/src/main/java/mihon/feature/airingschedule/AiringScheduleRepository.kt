@@ -43,6 +43,7 @@ class AiringScheduleRepository {
         weekStart: Long,
         weekEnd: Long,
         includeAdult: Boolean = false,
+        titleLanguage: SchedulePreferences.TitleLanguage = SchedulePreferences.TitleLanguage.ROMAJI,
     ): List<AiringScheduleEntry> {
         return withIOContext {
             var aniListError: Exception? = null
@@ -56,10 +57,14 @@ class AiringScheduleRepository {
             }
 
             try {
-                // An empty successful response is not useful schedule data. Treat it like an
-                // unavailable primary source, while keeping AniList primary for normal results.
+                // AniList remains the source of truth for schedule times, media IDs, and all
+                // title variants. LiveChart is only used when AniList is unavailable or empty.
                 aniListEntries?.takeIf { it.isNotEmpty() }
-                    ?: liveChartRepository.getWeeklySchedule(weekStart, weekEnd)
+                    ?: liveChartRepository.getWeeklySchedule(
+                        weekStart = weekStart,
+                        weekEnd = weekEnd,
+                        titleLanguage = titleLanguage,
+                    )
             } catch (liveChartError: kotlinx.coroutines.CancellationException) {
                 throw liveChartError
             } catch (liveChartError: Exception) {
