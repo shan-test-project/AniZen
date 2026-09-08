@@ -7,15 +7,8 @@ import org.junit.jupiter.api.Test
 class LiveChartScheduleParserTest {
 
     @Test
-    fun `english title selection is represented by the LiveChart schedule request`() {
-        assertEquals(
-            "english",
-            SchedulePreferences.TitleLanguage.ENGLISH.liveChartValue(),
-        )
-        assertEquals(
-            "romaji",
-            SchedulePreferences.TitleLanguage.USER_PREFERRED.liveChartValue(),
-        )
+    fun `fallback schedule request always selects English titles`() {
+        assertEquals("english", LiveChartScheduleRepository.LIVE_CHART_TITLE_LANGUAGE)
     }
 
     @Test

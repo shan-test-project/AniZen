@@ -26,7 +26,6 @@ class LiveChartScheduleRepository {
     suspend fun getWeeklySchedule(
         weekStart: Long,
         weekEnd: Long,
-        titleLanguage: SchedulePreferences.TitleLanguage = SchedulePreferences.TitleLanguage.ROMAJI,
     ): List<AiringScheduleEntry> {
         rateLimit()
 
@@ -35,7 +34,7 @@ class LiveChartScheduleRepository {
             .toLocalDate()
         val request = Request.Builder()
             .url(
-                "$SCHEDULE_URL?date=$scheduleDate&titles=${titleLanguage.liveChartValue()}",
+                "$SCHEDULE_URL?date=$scheduleDate&titles=$LIVE_CHART_TITLE_LANGUAGE",
             )
             .header("Accept", "text/html,application/xhtml+xml")
             .header("Accept-Language", "en-US,en;q=0.8")
@@ -75,20 +74,13 @@ class LiveChartScheduleRepository {
 
     companion object {
         private const val SCHEDULE_URL = "https://www.livechart.me/schedule"
+        // AniList is primary and supplies all title variants. If the fallback is needed, English
+        // is fixed here so its titles can match the app's English library titles.
+        internal const val LIVE_CHART_TITLE_LANGUAGE = "english"
         private const val MIN_REQUEST_INTERVAL_MS = 5_000L
         private val requestMutex = Mutex()
         private var lastRequestAt = 0L
     }
-}
-
-internal fun SchedulePreferences.TitleLanguage.liveChartValue(): String = when (this) {
-    SchedulePreferences.TitleLanguage.ENGLISH -> "english"
-    // LiveChart exposes Romaji and English. Romaji is its preferred-title default and is the
-    // closest available representation for User Preferred and Native.
-    SchedulePreferences.TitleLanguage.USER_PREFERRED,
-    SchedulePreferences.TitleLanguage.ROMAJI,
-    SchedulePreferences.TitleLanguage.NATIVE,
-    -> "romaji"
 }
 
 internal object LiveChartScheduleParser {

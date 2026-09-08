@@ -63,7 +63,6 @@ class AiringScheduleRepository {
                     ?: liveChartRepository.getWeeklySchedule(
                         weekStart = weekStart,
                         weekEnd = weekEnd,
-                        titleLanguage = titleLanguage,
                     )
             } catch (liveChartError: kotlinx.coroutines.CancellationException) {
                 throw liveChartError
