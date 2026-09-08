@@ -50,7 +50,7 @@ jobs:
           SIZE_BYTES=$(stat -c%s "$APK")
           SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
           echo "APK size: ${SIZE_MB} MiB (${SIZE_BYTES} bytes)"
-          if [ "$SIZE_MB" -gt 100 ]; then
+          if [ "$SIZE_MB" -gt 80 ]; then
             echo "The optimized APK exceeds the expected size ceiling." >&2
             exit 1
           fi

@@ -3,7 +3,7 @@ package mihon.feature.airingschedule
 import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.POST
-import eu.kanade.tachiyomi.network.awaitSuccess
+import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.network.jsonMime
 import eu.kanade.tachiyomi.network.parseAs
 import kotlinx.coroutines.delay
@@ -35,6 +35,7 @@ class AiringScheduleRepository {
 
     private val networkHelper: NetworkHelper by injectLazy()
     private val json: Json by injectLazy()
+    private val liveChartRepository = LiveChartScheduleRepository()
 
     private val client get() = networkHelper.client
 
@@ -44,22 +45,43 @@ class AiringScheduleRepository {
         includeAdult: Boolean = false,
     ): List<AiringScheduleEntry> {
         return withIOContext {
-            var page = 1
-            val allEntries = mutableListOf<AiringScheduleEntry>()
-            var hasNextPage = true
-            while (hasNextPage && page <= 10) {
-                val result = fetchPageWithRetry(weekStart, weekEnd, page, includeAdult)
-                allEntries.addAll(result.entries)
-                hasNextPage = result.hasNextPage
-                page++
-                if (hasNextPage) {
-                    // Small courtesy delay between paginated requests so we don't look like a
-                    // burst/bot to AniList's own rate limiter or edge network.
-                    delay(PAGE_DELAY_MS)
+            try {
+                getAniListWeeklySchedule(weekStart, weekEnd, includeAdult)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (aniListError: Exception) {
+                try {
+                    liveChartRepository.getWeeklySchedule(weekStart, weekEnd)
+                } catch (liveChartError: kotlinx.coroutines.CancellationException) {
+                    throw liveChartError
+                } catch (liveChartError: Exception) {
+                    aniListError.addSuppressed(liveChartError)
+                    throw aniListError
                 }
             }
-            allEntries
         }
+    }
+
+    private suspend fun getAniListWeeklySchedule(
+        weekStart: Long,
+        weekEnd: Long,
+        includeAdult: Boolean,
+    ): List<AiringScheduleEntry> {
+        var page = 1
+        val allEntries = mutableListOf<AiringScheduleEntry>()
+        var hasNextPage = true
+        while (hasNextPage && page <= 10) {
+            val result = fetchPageWithRetry(weekStart, weekEnd, page, includeAdult)
+            allEntries.addAll(result.entries)
+            hasNextPage = result.hasNextPage
+            page++
+            if (hasNextPage) {
+                // Small courtesy delay between paginated requests so we don't look like a
+                // burst/bot to AniList's own rate limiter or edge network.
+                delay(PAGE_DELAY_MS)
+            }
+        }
+        return allEntries
     }
 
     private suspend fun fetchPageWithRetry(
@@ -118,21 +140,40 @@ class AiringScheduleRepository {
         }
 
         with(json) {
-            val result = client.newCall(
+            val response = client.newCall(
                 POST(API_URL, body = payload.toString().toRequestBody(jsonMime)),
-            ).awaitSuccess().parseAs<ALScheduleResponse>()
+            ).await()
 
-            if (!result.errors.isNullOrEmpty()) {
-                val errorMsg = result.errors.mapNotNull { it.message }.joinToString("; ")
-                throw IOException("AniList GraphQL error: $errorMsg")
+            response.use {
+                val result = try {
+                    parseAs<ALScheduleResponse>()
+                } catch (e: Exception) {
+                    if (!isSuccessful) throw HttpException(code)
+                    throw e
+                }
+
+                if (!isSuccessful) {
+                    val errorMsg = result.errors
+                        .orEmpty()
+                        .mapNotNull { it.message }
+                        .joinToString("; ")
+                        .ifBlank { "HTTP error $code" }
+                    throw IOException("AniList API error: $errorMsg")
+                }
+
+                if (!result.errors.isNullOrEmpty()) {
+                    val errorMsg = result.errors.mapNotNull { it.message }.joinToString("; ")
+                    throw IOException("AniList GraphQL error: $errorMsg")
+                }
+
+                val pageData = result.data?.page
+                    ?: throw IOException("AniList response missing Page data")
+
+                return PageResult(
+                    entries = pageData.airingSchedules.mapNotNull { it.toEntry(includeAdult) },
+                    hasNextPage = pageData.pageInfo?.hasNextPage ?: false,
+                )
             }
-
-            val pageData = result.data?.page ?: throw IOException("AniList response missing Page data")
-
-            return PageResult(
-                entries = pageData.airingSchedules.mapNotNull { it.toEntry(includeAdult) },
-                hasNextPage = pageData.pageInfo?.hasNextPage ?: false,
-            )
         }
     }
 
