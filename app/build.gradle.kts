@@ -50,8 +50,8 @@ android {
     defaultConfig {
         applicationId = "app.anizen"
 
-        versionCode = 717
-        versionName = "0.5.217"
+        versionCode = 714
+        versionName = "0.5.214"
 
         manifestPlaceholders["author"] = "@salmanbappi"
 
@@ -161,6 +161,11 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // Compress native libraries so the arm64-v8a debug APK stays within the
+            // distribution size ceiling while remaining installable on supported Android versions.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += setOf(
                 "kotlin-tooling-metadata.json",
