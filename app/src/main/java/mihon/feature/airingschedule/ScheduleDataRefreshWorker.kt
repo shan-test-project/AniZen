@@ -254,6 +254,6 @@ data class ScheduleCacheData(
     val entries: List<AiringScheduleEntry>,
 ) {
     companion object {
-        const val CURRENT_VERSION = 2
+        const val CURRENT_VERSION = 3
     }
 }

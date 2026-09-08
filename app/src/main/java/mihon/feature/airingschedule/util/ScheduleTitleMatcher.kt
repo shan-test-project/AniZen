@@ -14,6 +14,18 @@ object ScheduleTitleMatcher {
     private val PARENTHETICAL_TAGS = Regex("(?i)\\s*[\\[\\(](tv|ona|ova|special|specials|movie|web)[\\]\\)]")
     private val SYMBOL_PUNCTUATION = Regex("[^\\p{L}\\p{N}\\s]")
     private val MULTI_WHITESPACE = Regex("\\s+")
+    private val UNICODE_ROMAN_NUMERALS = mapOf(
+        'Ⅰ' to "I",
+        'Ⅱ' to "II",
+        'Ⅲ' to "III",
+        'Ⅳ' to "IV",
+        'Ⅴ' to "V",
+        'Ⅵ' to "VI",
+        'Ⅶ' to "VII",
+        'Ⅷ' to "VIII",
+        'Ⅸ' to "IX",
+        'Ⅹ' to "X",
+    )
 
     // Season variations mapping to canonical "season X" / "part X"
     private val ORDINAL_SEASON = Regex("(?i)\\b(\\d+)(?:st|nd|rd|th)\\s+season\\b")
@@ -29,6 +41,7 @@ object ScheduleTitleMatcher {
     private val SHORT_COUR = Regex("(?i)\\bcour\\s+0*(\\d+)\\b")
     private val ROMAN_COUR = Regex("(?i)\\bcour\\s+(i{1,3}|iv|v|vi{0,3}|ix|x)\\b")
     private val TRAILING_ROMAN = Regex("(?i)\\b(ii|iii|iv|v|vi{0,3}|ix|x)\\s*$")
+    private val ROMAN_BEFORE_TITLE_SEPARATOR = Regex("(?i)\\b(ii|iii|iv|v|vi{0,3}|ix|x)\\s*(?=[:\\-])")
 
     /**
      * Converts Roman numerals (I - X) to standard Arabic integer string.
@@ -72,7 +85,7 @@ object ScheduleTitleMatcher {
         entry.titleEnglish?.takeIf { it.isNotBlank() },
         entry.titleRomaji?.takeIf { it.isNotBlank() },
         entry.titleNative?.takeIf { it.isNotBlank() },
-    )
+    ) + entry.titleAliases.filter { it.isNotBlank() }
 
     /**
      * Produces normalized variants of a title for robust matching.
@@ -84,7 +97,10 @@ object ScheduleTitleMatcher {
         val keys = mutableSetOf<String>()
 
         // 1. Basic clean (lowercase, replace smart quotes, trim)
-        val base = title.trim().lowercase()
+        val base = title.trim()
+            .map { UNICODE_ROMAN_NUMERALS[it] ?: it.toString() }
+            .joinToString("")
+            .lowercase()
             .replace(SMART_SINGLE_QUOTES, "'")
             .replace(SMART_DOUBLE_QUOTES, "\"")
 
@@ -138,6 +154,15 @@ object ScheduleTitleMatcher {
             val numKey = strippedTags.replace(TRAILING_ROMAN, num).trim()
             if (seasonKey.isNotEmpty()) keys.add(seasonKey)
             if (numKey.isNotEmpty()) keys.add(numKey)
+        }
+        val romanBeforeSubtitle = ROMAN_BEFORE_TITLE_SEPARATOR.find(strippedTags)
+        if (romanBeforeSubtitle != null) {
+            val num = romanToArabic(romanBeforeSubtitle.groupValues[1])
+            val seasonKey = strippedTags.replace(
+                ROMAN_BEFORE_TITLE_SEPARATOR,
+                "season $num",
+            ).trim()
+            if (seasonKey.isNotEmpty()) keys.add(seasonKey)
         }
 
         // 5. Punctuation-stripped alphanumeric representation for all keys

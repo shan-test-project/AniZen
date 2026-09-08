@@ -19,6 +19,7 @@ data class AiringScheduleEntry(
     val status: String? = null,
     val isAdult: Boolean = false,
     val genres: List<String> = emptyList(),
+    val titleAliases: List<String> = emptyList(),
 ) {
     fun displayTitle(language: SchedulePreferences.TitleLanguage): String = when (language) {
         SchedulePreferences.TitleLanguage.ENGLISH ->

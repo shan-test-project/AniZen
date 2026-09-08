@@ -55,6 +55,16 @@ class ScheduleTitleMatcherTest {
     }
 
     @Test
+    fun `unicode roman numerals match ascii and season notation`() {
+        assertTrue(
+            ScheduleTitleMatcher.matches(
+                "Mushoku Tensei Ⅲ: Isekai Ittara Honki Dasu",
+                "Mushoku Tensei III: Isekai Ittara Honki Dasu",
+            ),
+        )
+    }
+
+    @Test
     fun `different seasons do not collide`() {
         assertFalse(ScheduleTitleMatcher.matches("Jujutsu Kaisen Season 1", "Jujutsu Kaisen Season 2"))
         assertFalse(ScheduleTitleMatcher.matches("Jujutsu Kaisen S1", "Jujutsu Kaisen S2"))
@@ -90,5 +100,25 @@ class ScheduleTitleMatcherTest {
         assertTrue(ScheduleTitleMatcher.matchesAny("Sousou no Frieren (TV)", candidates))
         assertTrue(ScheduleTitleMatcher.matchesAny("葬送のフリーレン", candidates))
         assertFalse(ScheduleTitleMatcher.matchesAny("Dungeon Meshi", candidates))
+    }
+
+    @Test
+    fun `matchesAny includes title aliases used by fallback sources`() {
+        val entry = AiringScheduleEntry(
+            scheduleId = 1,
+            airingAt = 1000L,
+            episode = 1,
+            mediaId = -12735,
+            titleUserPreferred = "Mushoku Tensei: Jobless Reincarnation Season 3",
+            titleEnglish = "Mushoku Tensei: Jobless Reincarnation Season 3",
+            titleAliases = listOf("Mushoku Tensei Ⅲ: Isekai Ittara Honki Dasu"),
+        )
+
+        assertTrue(
+            ScheduleTitleMatcher.matchesAny(
+                "Mushoku Tensei III: Isekai Ittara Honki Dasu",
+                ScheduleTitleMatcher.candidateTitlesFromEntry(entry),
+            ),
+        )
     }
 }
