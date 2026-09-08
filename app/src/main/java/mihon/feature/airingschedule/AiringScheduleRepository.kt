@@ -144,20 +144,20 @@ class AiringScheduleRepository {
                 POST(API_URL, body = payload.toString().toRequestBody(jsonMime)),
             ).await()
 
-            response.use {
+            response.use { response ->
                 val result = try {
-                    parseAs<ALScheduleResponse>()
+                    response.parseAs<ALScheduleResponse>()
                 } catch (e: Exception) {
-                    if (!isSuccessful) throw HttpException(code)
+                    if (!response.isSuccessful) throw HttpException(response.code)
                     throw e
                 }
 
-                if (!isSuccessful) {
+                if (!response.isSuccessful) {
                     val errorMsg = result.errors
                         .orEmpty()
                         .mapNotNull { it.message }
                         .joinToString("; ")
-                        .ifBlank { "HTTP error $code" }
+                        .ifBlank { "HTTP error ${response.code}" }
                     throw IOException("AniList API error: $errorMsg")
                 }
 

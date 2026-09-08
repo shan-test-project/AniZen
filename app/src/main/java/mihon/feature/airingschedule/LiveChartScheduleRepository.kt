@@ -42,11 +42,11 @@ class LiveChartScheduleRepository {
             .build()
 
         val response = client.newCall(request).await()
-        response.use {
-            if (!isSuccessful) throw HttpException(code)
+        response.use { response ->
+            if (!response.isSuccessful) throw HttpException(response.code)
 
             val entries = LiveChartScheduleParser.parse(
-                html = body.string(),
+                html = response.body.string(),
                 weekStart = weekStart,
                 weekEnd = weekEnd,
             )
