@@ -11,6 +11,11 @@ The format is a modified version of [Keep a Changelog](https://keepachangelog.co
 - `Other` - for technical stuff.
 
 ## [Unreleased]
+### Improved
+
+- use LiveChart's date-anchored schedule and preferred title-language filter, and use migration deep search for library and schedule source searches
+- add a Schedule Settings choice for the primary schedule source, with AniList first by default and automatic fallback to the other source
+
 ### Fixed
 
 - resolve 0MB downloads by adding support for HLS master playlists in native engine

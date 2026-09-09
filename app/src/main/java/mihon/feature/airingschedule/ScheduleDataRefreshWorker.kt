@@ -27,8 +27,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Periodic WorkManager job that automatically refreshes the weekly airing schedule
- * from AniList and caches it locally. Frequency is configurable by the user
- * (1–7 days). Disabled by default.
+ * from the selected primary schedule source and caches it locally. Frequency is configurable by
+ * the user (1–7 days). Disabled by default.
  */
 class ScheduleDataRefreshWorker(
     private val context: Context,
@@ -46,6 +46,8 @@ class ScheduleDataRefreshWorker(
 
             val repository = AiringScheduleRepository()
             val includeAdult = schedulePrefs.showAdultContent().get()
+            val titleLanguage = schedulePrefs.titleLanguage().get()
+            val primarySource = schedulePrefs.primarySource().get()
 
             val zone = ZoneId.systemDefault()
             val now = ZonedDateTime.now(zone)
@@ -57,9 +59,17 @@ class ScheduleDataRefreshWorker(
                 weekStart.toEpochSecond(),
                 weekEnd.toEpochSecond(),
                 includeAdult = includeAdult,
+                titleLanguage = titleLanguage,
+                primarySource = primarySource,
             )
 
-            writeCache(context, weekStart.toEpochSecond(), entries)
+            writeCache(
+                context = context,
+                weekStartEpoch = weekStart.toEpochSecond(),
+                entries = entries,
+                titleLanguage = titleLanguage,
+                primarySource = primarySource,
+            )
 
             // Re-arm alarms for any anime the user subscribed to "notify every episode" for.
             // Series alarms are only ever scheduled from whichever week is currently loaded in
@@ -147,7 +157,13 @@ class ScheduleDataRefreshWorker(
          * can be used as a fallback if a later refresh attempt fails. Safe to call regardless of
          * whether auto-refresh is enabled. Also syncs upcoming exact air times to matched library anime.
          */
-        suspend fun writeCache(context: Context, weekStartEpoch: Long, entries: List<AiringScheduleEntry>) =
+        suspend fun writeCache(
+            context: Context,
+            weekStartEpoch: Long,
+            entries: List<AiringScheduleEntry>,
+            titleLanguage: SchedulePreferences.TitleLanguage,
+            primarySource: SchedulePreferences.ScheduleSource,
+        ) =
             withContext(Dispatchers.IO) {
                 if (entries.isEmpty()) return@withContext
                 try {
@@ -156,6 +172,8 @@ class ScheduleDataRefreshWorker(
                         fetchedAt = System.currentTimeMillis(),
                         weekStartEpoch = weekStartEpoch,
                         entries = entries,
+                        titleLanguage = titleLanguage.name,
+                        primarySource = primarySource.name,
                     )
                     val file = context.cacheFile()
                     file.parentFile?.mkdirs()
@@ -252,8 +270,10 @@ data class ScheduleCacheData(
     val fetchedAt: Long,
     val weekStartEpoch: Long,
     val entries: List<AiringScheduleEntry>,
+    val titleLanguage: String? = null,
+    val primarySource: String? = null,
 ) {
     companion object {
-        const val CURRENT_VERSION = 3
+        const val CURRENT_VERSION = 5
     }
 }

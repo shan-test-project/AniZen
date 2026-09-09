@@ -44,35 +44,60 @@ class AiringScheduleRepository {
         weekEnd: Long,
         includeAdult: Boolean = false,
         titleLanguage: SchedulePreferences.TitleLanguage = SchedulePreferences.TitleLanguage.ROMAJI,
+        primarySource: SchedulePreferences.ScheduleSource = SchedulePreferences.ScheduleSource.ANILIST,
     ): List<AiringScheduleEntry> {
         return withIOContext {
-            var aniListError: Exception? = null
-            val aniListEntries = try {
-                getAniListWeeklySchedule(weekStart, weekEnd, includeAdult)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                aniListError = e
-                null
+            when (primarySource) {
+                SchedulePreferences.ScheduleSource.ANILIST -> getWithFallback(
+                    primary = {
+                        getAniListWeeklySchedule(weekStart, weekEnd, includeAdult)
+                    },
+                    fallback = {
+                        liveChartRepository.getWeeklySchedule(
+                            weekStart = weekStart,
+                            weekEnd = weekEnd,
+                        )
+                    },
+                )
+                SchedulePreferences.ScheduleSource.LIVECHART -> getWithFallback(
+                    primary = {
+                        liveChartRepository.getWeeklySchedule(
+                            weekStart = weekStart,
+                            weekEnd = weekEnd,
+                        )
+                    },
+                    fallback = {
+                        getAniListWeeklySchedule(weekStart, weekEnd, includeAdult)
+                    },
+                )
             }
+        }
+    }
 
-            try {
-                // AniList remains the source of truth for schedule times, media IDs, and all
-                // title variants. LiveChart is only used when AniList is unavailable or empty.
-                aniListEntries?.takeIf { it.isNotEmpty() }
-                    ?: liveChartRepository.getWeeklySchedule(
-                        weekStart = weekStart,
-                        weekEnd = weekEnd,
-                    )
-            } catch (liveChartError: kotlinx.coroutines.CancellationException) {
-                throw liveChartError
-            } catch (liveChartError: Exception) {
-                aniListError?.let { error ->
-                    error.addSuppressed(liveChartError)
-                    throw error
-                }
-                throw liveChartError
+    private suspend fun getWithFallback(
+        primary: suspend () -> List<AiringScheduleEntry>,
+        fallback: suspend () -> List<AiringScheduleEntry>,
+    ): List<AiringScheduleEntry> {
+        var primaryError: Exception? = null
+        val primaryEntries = try {
+            primary()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            primaryError = e
+            null
+        }
+
+        return try {
+            primaryEntries?.takeIf { it.isNotEmpty() } ?: fallback()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (fallbackError: Exception) {
+            primaryError?.let { error ->
+                error.addSuppressed(fallbackError)
+                throw error
             }
+            throw fallbackError
         }
     }
 

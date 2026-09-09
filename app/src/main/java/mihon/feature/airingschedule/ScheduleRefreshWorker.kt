@@ -81,6 +81,8 @@ class ScheduleRefreshWorker(
             weekStart.toEpochSecond(),
             weekEnd.toEpochSecond(),
             includeAdult = schedulePrefs.showAdultContent().get(),
+            titleLanguage = schedulePrefs.titleLanguage().get(),
+            primarySource = schedulePrefs.primarySource().get(),
         )
         val windowStart = now.minusDays(2).toEpochSecond()
         val nowEpoch = now.toEpochSecond()

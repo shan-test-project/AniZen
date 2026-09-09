@@ -96,6 +96,11 @@ object SettingsScheduleScreen : SearchableSettings {
             SchedulePreferences.TitleLanguage.NATIVE to "Native",
         ).toImmutableMap()
 
+        val primarySourceOptions = mapOf(
+            SchedulePreferences.ScheduleSource.ANILIST to "AniList",
+            SchedulePreferences.ScheduleSource.LIVECHART to "LiveChart",
+        ).toImmutableMap()
+
         val intervalOptions = mapOf(
             SchedulePreferences.UploadDelayInterval.THIRTY_MIN to "Every 30 minutes",
             SchedulePreferences.UploadDelayInterval.ONE_HOUR to "Every 1 hour",
@@ -137,6 +142,12 @@ object SettingsScheduleScreen : SearchableSettings {
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.pref_schedule_sources_title),
                 preferenceItems = persistentListOf(
+                    Preference.PreferenceItem.ListPreference(
+                        pref = schedulePreferences.primarySource(),
+                        title = "Primary schedule source",
+                        subtitle = "Choose which service is tried first. The other service remains an automatic fallback. Default: AniList",
+                        entries = primarySourceOptions,
+                    ),
                     Preference.PreferenceItem.MultiSelectListPreference(
                         pref = schedulePreferences.favoriteSourceIds(),
                         title = stringResource(MR.strings.pref_schedule_favorite_sources),
@@ -220,7 +231,7 @@ object SettingsScheduleScreen : SearchableSettings {
                 title = stringResource(MR.strings.pref_schedule_about_title),
                 preferenceItems = persistentListOf(
                     Preference.PreferenceItem.InfoPreference(
-                        title = "The airing schedule is powered by AniList. Upload delay tracking monitors when episodes appear on your pinned sources vs the official air time — uses priority order (1st pinned source takes precedence). Tap the search or bookmark icon on any anime to find it in your sources.",
+                        title = "The airing schedule uses your selected primary source and automatically falls back to the other source. Upload delay tracking monitors when episodes appear on your pinned sources vs the official air time — uses priority order (1st pinned source takes precedence). Tap the search or bookmark icon on any anime to find it in your sources.",
                     ),
                 ),
             ),

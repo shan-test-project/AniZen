@@ -34,6 +34,7 @@ class AiringScheduleScreenModel(
     private var allEntries: List<AiringScheduleEntry> = emptyList()
     private var hasLoaded = false
     private var lastTitleLanguage = schedulePrefs.titleLanguage().get()
+    private var lastPrimarySource = schedulePrefs.primarySource().get()
 
     init {
         loadSchedule()
@@ -89,16 +90,19 @@ class AiringScheduleScreenModel(
                 schedulePrefs.favoriteSourceIds().changes(),
                 schedulePrefs.showAdultContent().changes(),
                 schedulePrefs.titleLanguage().changes(),
+                schedulePrefs.primarySource().changes(),
                 schedulePrefs.uploadDelayRefreshInterval().changes(),
                 schedulePrefs.customUploadDelayMinutes().changes(),
                 schedulePrefs.sourceUploadDelays().changes(),
                 schedulePrefs.viewMode().changes(),
             ) { _ -> Unit }.collectLatest {
                 val titleLanguage = schedulePrefs.titleLanguage().get()
-                if (titleLanguage != lastTitleLanguage) {
+                val primarySource = schedulePrefs.primarySource().get()
+                if (titleLanguage != lastTitleLanguage || primarySource != lastPrimarySource) {
                     // Re-fetch after a language change so an older cached payload cannot keep
                     // displaying AniList's userPreferred/Romaji title.
                     lastTitleLanguage = titleLanguage
+                    lastPrimarySource = primarySource
                     loadSchedule(forceRefresh = true)
                 } else if (allEntries.isNotEmpty()) {
                     applyFilters()
@@ -120,7 +124,13 @@ class AiringScheduleScreenModel(
             val currentWeekStart = weekStart.toEpochSecond()
 
             // 1. Try reading disk cache first (Instant Offline Display, no blank screen)
+            val requestedTitleLanguage = schedulePrefs.titleLanguage().get()
+            val requestedPrimarySource = schedulePrefs.primarySource().get()
             val cache = ScheduleDataRefreshWorker.readCache(application)
+                ?.takeIf {
+                    it.titleLanguage == requestedTitleLanguage.name &&
+                        it.primarySource == requestedPrimarySource.name
+                }
             val cachedEntries = if (cache != null && cache.entries.isNotEmpty()) {
                 cache.entries
             } else null
@@ -155,10 +165,18 @@ class AiringScheduleScreenModel(
                     weekStart.toEpochSecond(),
                     weekEndExclusive.toEpochSecond(),
                     includeAdult = includeAdult,
+                    titleLanguage = requestedTitleLanguage,
+                    primarySource = requestedPrimarySource,
                 )
 
                 // Persist live fetch to disk cache
-                ScheduleDataRefreshWorker.writeCache(application, currentWeekStart, fetched)
+                ScheduleDataRefreshWorker.writeCache(
+                    context = application,
+                    weekStartEpoch = currentWeekStart,
+                    entries = fetched,
+                    titleLanguage = requestedTitleLanguage,
+                    primarySource = requestedPrimarySource,
+                )
 
                 allEntries = fetched
                 hasLoaded = true

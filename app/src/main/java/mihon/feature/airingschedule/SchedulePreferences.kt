@@ -7,6 +7,7 @@ class SchedulePreferences(
     private val preferenceStore: PreferenceStore,
 ) {
     enum class TitleLanguage { USER_PREFERRED, ENGLISH, ROMAJI, NATIVE }
+    enum class ScheduleSource { ANILIST, LIVECHART }
     enum class UploadDelayInterval(val minutes: Long) {
         THIRTY_MIN(30),
         ONE_HOUR(60),
@@ -37,6 +38,11 @@ class SchedulePreferences(
     fun titleLanguage() = preferenceStore.getEnum(
         "schedule_title_language",
         TitleLanguage.USER_PREFERRED,
+    )
+
+    fun primarySource() = preferenceStore.getEnum(
+        "schedule_primary_source",
+        ScheduleSource.ANILIST,
     )
 
     fun showAdultContent() = preferenceStore.getBoolean(
