@@ -1,0 +1,1 @@
+- [AniZen checkout location](anizen-checkout-location.md) — GitHub AniZen sources are checked out at workspace root; the nested anizen/ tree is a separate stale copy.
