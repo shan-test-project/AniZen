@@ -835,7 +835,7 @@ class PlayerViewModel @JvmOverloads constructor(
             return
         }
         val anime = currentAnime.value ?: return
-        val episode = currentEpisode.value?.episodeNumber?.toInt()?.takeIf { it > 0 } ?: return
+        val episode = currentEpisode.value?.episode_number?.toInt()?.takeIf { it > 0 } ?: return
         viewModelScope.launchIO {
             try {
                 val api = JimakuApi(

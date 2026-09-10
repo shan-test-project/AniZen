@@ -26,6 +26,7 @@ import eu.kanade.domain.episode.interactor.SyncEpisodesWithSource
 import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.track.interactor.TrackEpisode
 import eu.kanade.domain.track.model.AutoTrackState
+import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.domain.track.model.toDomainTrack
 import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.presentation.anime.DownloadAction
@@ -1904,7 +1905,7 @@ class AnimeScreenModel(
                                 .forEach { item ->
                                     if (relations == null) {
                                         relations = (item.tracker as? eu.kanade.tachiyomi.data.track.AnimeTracker)
-                                            ?.getAnimeRelations(item.track!!)
+                                            ?.getAnimeRelations(item.track!!.toDbTrack())
                                             ?.takeIf { it.isNotEmpty() }
                                     }
                                 }
