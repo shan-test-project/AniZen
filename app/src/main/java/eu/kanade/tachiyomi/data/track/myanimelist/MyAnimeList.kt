@@ -55,6 +55,10 @@ class MyAnimeList(id: Long) :
 
     override val supportsReadingDates: Boolean = true
 
+    override suspend fun getAnimeRelations(track: Track): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
+        return api.getAnimeRelations(track.remote_id)
+    }
+
     override fun getLogo() = R.drawable.ic_tracker_mal
 
     override fun getLogoColor() = Color.rgb(46, 81, 162)

@@ -541,7 +541,10 @@ class PlayerActivity : BaseActivity() {
             logLvl = logLevel,
         )
         MPVLib.setOptionString("sub-ass-force-margins", "yes")
-        MPVLib.setOptionString("sub-use-margins", "yes")
+        MPVLib.setOptionString(
+            "sub-use-margins",
+            if (Injekt.get<SubtitlePreferences>().fitSubtitlesToVideo().get()) "no" else "yes",
+        )
         MPVLib.setOptionString("idle", "yes")
         MPVLib.addLogObserver(playerObserver)
         MPVLib.addObserver(playerObserver)

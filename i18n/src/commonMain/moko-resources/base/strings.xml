@@ -366,6 +366,12 @@
     <string name="pref_player_subtitle_blacklist_info">Blacklist for subtitles. If a blacklist is defined, all subtitles that contains a blacklisted word will be filtered out. Multiple values can be delimited by a comma.</string>
     <string name="pref_disable_auto_subtitles">Disable auto subtitle selection</string>
     <string name="pref_disable_auto_subtitles_summary">Do not automatically select any subtitle track when loading a video</string>
+    <string name="player_sheets_sub_fit_to_video">Fit subtitles into video size</string>
+    <string name="pref_jimaku_enabled">Enable Jimaku subtitles</string>
+    <string name="pref_jimaku_enabled_summary">Add Japanese subtitles from Jimaku to the player subtitle tracks</string>
+    <string name="pref_jimaku_api_key">Jimaku API key</string>
+    <string name="pref_jimaku_api_key_info">Create a key at jimaku.cc, then paste it here. The key is stored locally and sent only to Jimaku.</string>
+    <string name="player_sheets_add_jimaku_sub">Get subtitles from Jimaku</string>
 
     <!-- Player settings - Audio -->
     <string name="pref_player_audio">Audio</string>

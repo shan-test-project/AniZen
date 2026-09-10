@@ -123,6 +123,7 @@ fun PlayerSheets(
                 selectedTracks = selectedSubtitles,
                 onSelect = onSelectSubtitle,
                 onAddSubtitle = { subtitlesPicker.launch(arrayOf("*/*")) },
+                onAddJimakuSubtitle = viewModel::addJimakuSubtitle,
                 onOpenSubtitleSettings = { onOpenPanel(Panels.SubtitleSettings) },
                 onOpenSubtitleDelay = { onOpenPanel(Panels.SubtitleDelay) },
                 onDismissRequest = onDismissRequest,

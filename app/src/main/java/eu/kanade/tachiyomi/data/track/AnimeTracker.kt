@@ -6,6 +6,7 @@ import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.track.model.toDomainTrack
 import eu.kanade.tachiyomi.data.database.models.Track
 import eu.kanade.tachiyomi.animesource.model.Credit
+import eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.ImmutableList
@@ -116,6 +117,13 @@ interface AnimeTracker {
     }
 
     suspend fun fetchCastByTitle(remoteId: Long, mediaType: String): List<Credit>? = null
+
+    /**
+     * Returns sequel/prequel relations from the connected tracker when that tracker exposes
+     * relation metadata. A null result means that this tracker does not provide relations and
+     * allows the caller to use its fallback source.
+     */
+    suspend fun getAnimeRelations(track: Track): List<ALRelationEdge>? = null
 
     fun getStatusForAnime(status: Long): StringResource?
 }

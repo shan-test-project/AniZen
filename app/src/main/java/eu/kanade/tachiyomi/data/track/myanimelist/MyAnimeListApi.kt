@@ -5,6 +5,8 @@ import androidx.core.net.toUri
 import eu.kanade.tachiyomi.data.database.models.Track
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import eu.kanade.tachiyomi.data.track.myanimelist.dto.MALAnime
+import eu.kanade.tachiyomi.data.track.myanimelist.dto.MALAnimeRelations
+import eu.kanade.tachiyomi.data.track.myanimelist.dto.toRelationEdges
 import eu.kanade.tachiyomi.data.track.myanimelist.dto.MALListItem
 import eu.kanade.tachiyomi.data.track.myanimelist.dto.MALListItemStatus
 import eu.kanade.tachiyomi.data.track.myanimelist.dto.MALOAuth
@@ -120,6 +122,21 @@ class MyAnimeListApi(
                             start_date = it.startDate ?: ""
                         }
                     }
+            }
+        }
+    }
+
+    suspend fun getAnimeRelations(id: Long): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
+        return withIOContext {
+            val url = "$BASE_API_URL/anime".toUri().buildUpon()
+                .appendPath(id.toString())
+                .appendQueryParameter("fields", "related_anime")
+                .build()
+            with(json) {
+                authClient.newCall(GET(url.toString()))
+                    .awaitSuccess()
+                    .parseAs<MALAnimeRelations>()
+                    .toRelationEdges()
             }
         }
     }

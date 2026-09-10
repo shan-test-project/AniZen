@@ -1891,21 +1891,42 @@ class AnimeScreenModel(
                 }
                 updateAiringTime(anime, trackItems, manualFetch = false)
 
-                val anilistTrackItem = trackItems.find { it.tracker is eu.kanade.tachiyomi.data.track.anilist.Anilist && it.track != null }
-                if (anilistTrackItem != null) {
-                    val tracker = anilistTrackItem.tracker as eu.kanade.tachiyomi.data.track.anilist.Anilist
-                    val remoteId = anilistTrackItem.track!!.remoteId
-                    val alreadyFetched = successState?.hasFetchedRelations == true
-                    if (!alreadyFetched) {
-                        updateSuccessState { it.copySuccess(hasFetchedRelations = true) }
-                        screenModelScope.launchIO {
-                            try {
-                                val relations = tracker.getAnimeRelations(remoteId)
-                                updateSuccessState { it.copySuccess(relations = relations.toImmutableList()) }
-                            } catch (e: Exception) {
-                                logcat(LogPriority.ERROR, e)
-                                updateSuccessState { it.copySuccess(hasFetchedRelations = false) }
+                val alreadyFetched = successState?.hasFetchedRelations == true
+                if (!alreadyFetched) {
+                    updateSuccessState { it.copySuccess(hasFetchedRelations = true) }
+                    screenModelScope.launchIO {
+                        try {
+                            // Prefer relation metadata from a connected tracker entry. Trackers
+                            // that do not expose relations return null and are skipped.
+                            var relations: List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>? = null
+                            trackItems.asSequence()
+                                .filter { it.track != null }
+                                .forEach { item ->
+                                    if (relations == null) {
+                                        relations = (item.tracker as? eu.kanade.tachiyomi.data.track.AnimeTracker)
+                                            ?.getAnimeRelations(item.track!!)
+                                            ?.takeIf { it.isNotEmpty() }
+                                    }
+                                }
+
+                            // Keep AniList as a fallback for older trackers and for titles whose
+                            // connected tracker has no relation endpoint.
+                            if (relations == null) {
+                                val anilistTrackItem = trackItems.find {
+                                    it.tracker is eu.kanade.tachiyomi.data.track.anilist.Anilist && it.track != null
+                                }
+                                if (anilistTrackItem != null) {
+                                    relations = (anilistTrackItem.tracker as eu.kanade.tachiyomi.data.track.anilist.Anilist)
+                                        .getAnimeRelations(anilistTrackItem.track!!.remoteId)
+                                }
                             }
+
+                            updateSuccessState {
+                                it.copySuccess(relations = (relations ?: emptyList()).toImmutableList())
+                            }
+                        } catch (e: Exception) {
+                            logcat(LogPriority.ERROR, e)
+                            updateSuccessState { it.copySuccess(hasFetchedRelations = false) }
                         }
                     }
                 }

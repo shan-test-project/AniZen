@@ -85,6 +85,21 @@ fun SubtitlesMiscellaneousCard(modifier: Modifier = Modifier) {
                     .padding(MaterialTheme.padding.medium)
                     .fillMaxWidth(),
             )
+            var fitSubtitlesToVideo by remember {
+                mutableStateOf(preferences.fitSubtitlesToVideo().get())
+            }
+            SwitchPreference(
+                fitSubtitlesToVideo,
+                onValueChange = {
+                    fitSubtitlesToVideo = it
+                    preferences.fitSubtitlesToVideo().set(it)
+                    MPVLib.setPropertyBoolean("sub-use-margins", !it)
+                },
+                content = { Text(stringResource(MR.strings.player_sheets_sub_fit_to_video)) },
+                modifier = Modifier
+                    .padding(MaterialTheme.padding.medium)
+                    .fillMaxWidth(),
+            )
             var subScale by remember {
                 mutableStateOf(MPVLib.getPropertyDouble("sub-scale").toFloat())
             }
@@ -143,6 +158,10 @@ fun SubtitlesMiscellaneousCard(modifier: Modifier = Modifier) {
                         }
                         preferences.overrideSubsASS().deleteAndGet().let { overrideAssSubs = it }
                         MPVLib.setPropertyString("sub-ass-override", "scale") // mpv's default is 'scale'
+                        preferences.fitSubtitlesToVideo().get().let {
+                            fitSubtitlesToVideo = it
+                            MPVLib.setPropertyBoolean("sub-use-margins", !it)
+                        }
                     },
                 ) {
                     Row {

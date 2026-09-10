@@ -81,6 +81,8 @@ import eu.kanade.tachiyomi.ui.player.utils.AniSkipApi
 import eu.kanade.tachiyomi.ui.player.utils.ChapterUtils.Companion.getStringRes
 import eu.kanade.tachiyomi.ui.player.utils.DefaultStreamPreferenceStore
 import eu.kanade.tachiyomi.ui.player.utils.DefaultStreamSelector
+import eu.kanade.tachiyomi.ui.player.utils.JimakuApi
+import eu.kanade.tachiyomi.ui.player.utils.rankJimakuFile
 import eu.kanade.tachiyomi.ui.player.utils.TrackSelect
 import eu.kanade.tachiyomi.ui.reader.SaveImageNotifier
 import eu.kanade.tachiyomi.util.editCover
@@ -814,6 +816,48 @@ class PlayerViewModel @JvmOverloads constructor(
                 MPVLib.command(arrayOf("sub-add", url, "select"))
             } else {
                 MPVLib.command(arrayOf("sub-add", url, "select", name))
+            }
+        }
+    }
+
+    /**
+     * Searches Jimaku for the current title, selects the highest quality subtitle file for the
+     * current episode, caches it, and sends it through the same MPV subtitle path as local files.
+     */
+    fun addJimakuSubtitle() {
+        if (!subtitlePreferences.jimakuEnabled().get()) {
+            activity.toast(MR.strings.pref_jimaku_enabled)
+            return
+        }
+        val apiKey = subtitlePreferences.jimakuApiKey().get().trim()
+        if (apiKey.isBlank()) {
+            activity.toast(MR.strings.pref_jimaku_api_key)
+            return
+        }
+        val anime = currentAnime.value ?: return
+        val episode = currentEpisode.value?.episodeNumber?.toInt()?.takeIf { it > 0 } ?: return
+        viewModelScope.launchIO {
+            try {
+                val api = JimakuApi(
+                    apiKey = apiKey,
+                    cacheDir = File(activity.cacheDir, "jimaku"),
+                    client = networkHelper.client,
+                )
+                val entries = api.searchByName(anime.title)
+                val entry = entries.firstOrNull()
+                    ?: throw IllegalStateException("No Jimaku entry found for ${anime.title}")
+                val file = api.getSubtitleFiles(entry.id, episode)
+                    .maxWithOrNull(compareBy({ rankJimakuFile(it.name) }, { -it.size }))
+                    ?: throw IllegalStateException("No subtitle found for episode $episode")
+                val cached = api.downloadSubtitleToCache(file)
+                    ?: throw IllegalStateException("Jimaku subtitle download failed")
+                withUIContext {
+                    addSubtitle(Uri.fromFile(cached))
+                    activity.toast(MR.strings.player_sheets_add_jimaku_sub)
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.WARN, e) { "Failed to add Jimaku subtitle" }
+                withUIContext { activity.toast(e.message ?: "Jimaku subtitle request failed") }
             }
         }
     }

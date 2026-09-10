@@ -46,12 +46,16 @@ class SubtitlePreferences(
 
     fun subtitleJustification() = preferenceStore.getEnum("pref_sub_justify", SubtitleJustification.Auto)
     fun subtitlePos() = preferenceStore.getInt("pref_sub_pos", 100)
+    fun fitSubtitlesToVideo() = preferenceStore.getBoolean("pref_fit_subtitles_to_video", true)
 
     fun overrideSubsASS() = preferenceStore.getBoolean("pref_override_subtitles_ass", false)
 
     fun subtitlesDelay() = preferenceStore.getInt("pref_subtitles_delay", 0)
     fun subtitlesSpeed() = preferenceStore.getFloat("pref_subtitles_speed", 1f)
     fun subtitlesSecondaryDelay() = preferenceStore.getInt("pref_subtitles_secondary_delay", 0)
+
+    fun jimakuEnabled() = preferenceStore.getBoolean("pref_jimaku_enabled", false)
+    fun jimakuApiKey() = preferenceStore.getString("pref_jimaku_api_key", "")
 }
 
 enum class SubtitleJustification(

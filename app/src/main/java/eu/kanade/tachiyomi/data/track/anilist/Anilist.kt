@@ -227,6 +227,10 @@ class Anilist(id: Long) :
 
     private val relationsCache = java.util.concurrent.ConcurrentHashMap<Long, List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>>()
 
+    override suspend fun getAnimeRelations(track: eu.kanade.tachiyomi.data.database.models.Track): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
+        return getAnimeRelations(track.remote_id)
+    }
+
     suspend fun getAnimeRelations(trackId: Long): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
         val cached = relationsCache[trackId]
         if (cached != null) return cached
