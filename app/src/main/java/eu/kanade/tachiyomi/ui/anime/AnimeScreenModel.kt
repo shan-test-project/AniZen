@@ -1907,30 +1907,26 @@ class AnimeScreenModel(
                             var relations: List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>? = null
                             storedTracks.forEach { storedTrack ->
                                 if (relations == null) {
-                                    val trackerRelations = runCatching {
+                                    relations = runCatching {
                                         trackerManager.get(storedTrack.trackerId)
                                             ?.animeService
                                             ?.getAnimeRelations(storedTrack.toDbTrack())
-                                    }.getOrNull()
-                                    relations = trackerRelations?.takeIf { it.isNotEmpty() }
+                                    }.getOrNull()?.takeIf { it.isNotEmpty() }
                                 }
                             }
 
-                            // AniList relations are public. Prefer the stored AniList remote ID
-                            // when one exists, then resolve an ID directly from the current title
-                            // for untracked anime and trackers without relation support.
+                            // AniList relations are public. Use the stored AniList remote ID
+                            // when one exists. Keep this fallback isolated so an AniList outage
+                            // cannot discard relations already returned by another tracker or
+                            // its local cache.
                             if (relations == null) {
                                 val storedAniListId = storedTracks
                                     .firstOrNull { it.trackerId == TrackerManager.ANILIST }
                                     ?.remoteId
                                     ?.takeIf { it > 0L }
-                                val aniListId = storedAniListId
-                                    ?: trackerManager.aniList.api.findMediaIdByTitle(anime.title)?.toLong()
-                                if (aniListId != null) {
-                                    relations = trackerManager.aniList
-                                        .getAnimeRelations(aniListId)
-                                        .takeIf { it.isNotEmpty() }
-                                }
+                                relations = runCatching {
+                                    storedAniListId?.let { trackerManager.aniList.getAnimeRelations(it) }
+                                }.getOrNull()?.takeIf { it.isNotEmpty() }
                             }
 
                             updateSuccessState {

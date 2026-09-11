@@ -14,3 +14,17 @@ mtime_ms = 1789121636000
 storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:28305656-f96e-45c5-bf26-324f484b30ea/c82e2d6b-172c-44ba-9093-cda56c621aac/72528734-ffe3-4f76-b51c-e222b6855635"
 storage_version_token = "1789124114537768"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Lm54aSR5bHrp0ImfEeAvV"
+uri = "file://artifacts/anizen-v0.5.224-v8a-r8-debug/AniZen-v0.5.224-v8a-r8-debug.apk"
+type = "unspecified"
+title = "AniZen v0.5.224 arm64 R8 debug APK"
+description = "Built remotely by GitHub Actions from the tracked-relations fix. arm64-v8a split, full R8, resource shrinking, compressed native libraries, debug signing."
+logical_id = "0cb93a30-0d90-4312-8e06-efc61cc0f4e6"
+content_hash = "sha256:97ff8904375d14cb171b17c0698181833cb1328eae6ef3f82b52c560a02c8fe4"
+size = 51674280
+mtime_ms = 1789126494000
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:e2a5fc9b-c53f-4465-b1d1-3e3a98a9aeb9/0cb93a30-0d90-4312-8e06-efc61cc0f4e6/c5d61730-cd39-4743-9e6a-a8a1ef03ca51"
+storage_version_token = "1789126704290463"
+content_type = "application/octet-stream"
