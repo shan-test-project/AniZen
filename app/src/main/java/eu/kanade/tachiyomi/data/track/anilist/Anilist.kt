@@ -13,13 +13,17 @@ import eu.kanade.tachiyomi.data.track.ImportableTracker
 import eu.kanade.tachiyomi.data.track.ImportableEntry
 import eu.kanade.tachiyomi.data.track.ImportStatusFilter
 import eu.kanade.tachiyomi.data.track.anilist.dto.ALOAuth
+import eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import tachiyomi.i18n.MR
+import tachiyomi.core.common.preference.Preference
+import tachiyomi.core.common.preference.PreferenceStore
 import uy.kohesive.injekt.injectLazy
 import tachiyomi.domain.track.model.Track as DomainAnimeTrack
 
@@ -59,6 +63,7 @@ class Anilist(id: Long) :
     override val supportsReadingDates: Boolean = true
 
     private val scorePreference = trackPreferences.anilistScoreType()
+    private val preferenceStore: PreferenceStore by injectLazy()
 
     init {
         // If the preference is an int from APIv1, logout user to force using APIv2
@@ -225,17 +230,38 @@ class Anilist(id: Long) :
         return track
     }
 
-    private val relationsCache = java.util.concurrent.ConcurrentHashMap<Long, List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>>()
+    private val relationsCache = java.util.concurrent.ConcurrentHashMap<Long, List<ALRelationEdge>>()
 
-    override suspend fun getAnimeRelations(track: eu.kanade.tachiyomi.data.database.models.Track): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
+    override suspend fun getAnimeRelations(track: eu.kanade.tachiyomi.data.database.models.Track): List<ALRelationEdge> {
         return getAnimeRelations(track.remote_id)
     }
 
-    suspend fun getAnimeRelations(trackId: Long): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
+    suspend fun getAnimeRelations(trackId: Long): List<ALRelationEdge> {
         val cached = relationsCache[trackId]
         if (cached != null) return cached
+
+        // Relation metadata is public and independent of the AniList account. Keep the last
+        // successful result on disk so a temporary AniList outage does not remove the cards
+        // from an already-tracked anime after the app is restarted.
+        val stored = preferenceStore
+            .getString(Preference.appStateKey("anilist_relations_$trackId"))
+            .get()
+            .takeIf { it.isNotBlank() }
+            ?.let { raw ->
+                runCatching { json.decodeFromString<List<ALRelationEdge>>(raw) }.getOrNull()
+            }
+        if (stored != null) {
+            relationsCache[trackId] = stored
+            return stored
+        }
+
         val fetched = api.getRelations(trackId.toInt())
         relationsCache[trackId] = fetched
+        if (fetched.isNotEmpty()) {
+            preferenceStore
+                .getString(Preference.appStateKey("anilist_relations_$trackId"))
+                .set(json.encodeToString(fetched))
+        }
         return fetched
     }
 
