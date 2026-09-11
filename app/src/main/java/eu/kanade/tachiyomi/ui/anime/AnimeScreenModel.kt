@@ -1915,20 +1915,17 @@ class AnimeScreenModel(
                                 }
                             }
 
-                            // AniList relations are public. Prefer the stored AniList remote ID
-                            // when one exists, then resolve an ID directly from the current title
-                            // for untracked anime and trackers without relation support. Keep this
-                            // fallback isolated so an AniList outage cannot discard relations
-                            // already returned by another tracker or its local cache.
+                            // AniList relations are public. Use the stored AniList remote ID
+                            // when one exists. Keep this fallback isolated so an AniList outage
+                            // cannot discard relations already returned by another tracker or
+                            // its local cache.
                             if (relations == null) {
                                 val storedAniListId = storedTracks
                                     .firstOrNull { it.trackerId == TrackerManager.ANILIST }
                                     ?.remoteId
                                     ?.takeIf { it > 0L }
                                 relations = runCatching {
-                                    val aniListId = storedAniListId
-                                        ?: trackerManager.aniList.api.findMediaIdByTitle(anime.title)?.toLong()
-                                    aniListId?.let { trackerManager.aniList.getAnimeRelations(it) }
+                                    storedAniListId?.let { trackerManager.aniList.getAnimeRelations(it) }
                                 }.getOrNull()?.takeIf { it.isNotEmpty() }
                             }
 
