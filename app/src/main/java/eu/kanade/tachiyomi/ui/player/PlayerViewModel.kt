@@ -82,6 +82,7 @@ import eu.kanade.tachiyomi.ui.player.utils.ChapterUtils.Companion.getStringRes
 import eu.kanade.tachiyomi.ui.player.utils.DefaultStreamPreferenceStore
 import eu.kanade.tachiyomi.ui.player.utils.DefaultStreamSelector
 import eu.kanade.tachiyomi.ui.player.utils.JimakuApi
+import eu.kanade.tachiyomi.ui.player.utils.isExplicitlyEnglishSubtitle
 import eu.kanade.tachiyomi.ui.player.utils.rankJimakuFile
 import eu.kanade.tachiyomi.ui.player.utils.TrackSelect
 import eu.kanade.tachiyomi.ui.reader.SaveImageNotifier
@@ -846,9 +847,11 @@ class PlayerViewModel @JvmOverloads constructor(
                 val entries = api.searchByName(anime.title)
                 val entry = entries.firstOrNull()
                     ?: throw IllegalStateException("No Jimaku entry found for ${anime.title}")
-                val file = api.getSubtitleFiles(entry.id, episode)
+                val englishFiles = api.getSubtitleFiles(entry.id, episode)
+                    .filter { isExplicitlyEnglishSubtitle(it.name) }
+                val file = englishFiles
                     .maxWithOrNull(compareBy({ rankJimakuFile(it.name) }, { -it.size }))
-                    ?: throw IllegalStateException("No subtitle found for episode $episode")
+                    ?: throw IllegalStateException("No explicitly English Jimaku subtitle found for episode $episode")
                 val cached = api.downloadSubtitleToCache(file)
                     ?: throw IllegalStateException("Jimaku subtitle download failed")
                 withUIContext {

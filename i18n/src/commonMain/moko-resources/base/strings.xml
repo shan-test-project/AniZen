@@ -368,7 +368,7 @@
     <string name="pref_disable_auto_subtitles_summary">Do not automatically select any subtitle track when loading a video</string>
     <string name="player_sheets_sub_fit_to_video">Fit subtitles into video size</string>
     <string name="pref_jimaku_enabled">Enable Jimaku subtitles</string>
-    <string name="pref_jimaku_enabled_summary">Add Japanese subtitles from Jimaku to the player subtitle tracks</string>
+    <string name="pref_jimaku_enabled_summary">Add explicitly English-labelled subtitles from Jimaku to the player subtitle tracks</string>
     <string name="pref_jimaku_api_key">Jimaku API key</string>
     <string name="pref_jimaku_api_key_info">Create a key at jimaku.cc, then paste it here. The key is stored locally and sent only to Jimaku.</string>
     <string name="player_sheets_add_jimaku_sub">Get subtitles from Jimaku</string>
