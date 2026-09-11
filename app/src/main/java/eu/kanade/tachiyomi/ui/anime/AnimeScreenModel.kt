@@ -1872,12 +1872,16 @@ class AnimeScreenModel(
                 val trackItems = loggedInTrackers.map { service ->
                     TrackItem(animeTracks.find { it.trackerId == service.id }, service)
                 }
-                Triple(
-                    supportedTrackerTracks.size,
-                    supportedTrackers.isNotEmpty(),
-                    trackItems,
+                Pair(
+                    animeTracks,
+                    Triple(
+                        supportedTrackerTracks.size,
+                        supportedTrackers.isNotEmpty(),
+                        trackItems,
+                    ),
                 )
-            }.flowWithLifecycle(lifecycle).distinctUntilChanged().collectLatest { (trackingCount, hasLoggedInTrackers, trackItems) ->
+            }.flowWithLifecycle(lifecycle).distinctUntilChanged().collectLatest { (storedTracks, trackerState) ->
+                val (trackingCount, hasLoggedInTrackers, trackItems) = trackerState
                 updateSuccessState {
                     it.copySuccess(
                         trackingCount = trackingCount,
@@ -1901,7 +1905,7 @@ class AnimeScreenModel(
                             // logged-in trackers. This keeps restored/backed-up library entries
                             // eligible for relations.
                             var relations: List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>? = null
-                            animeTracks.forEach { storedTrack ->
+                            storedTracks.forEach { storedTrack ->
                                 if (relations == null) {
                                     val trackerRelations = runCatching {
                                         trackerManager.get(storedTrack.trackerId)
@@ -1916,7 +1920,7 @@ class AnimeScreenModel(
                             // when one exists, then resolve an ID directly from the current title
                             // for untracked anime and trackers without relation support.
                             if (relations == null) {
-                                val storedAniListId = animeTracks
+                                val storedAniListId = storedTracks
                                     .firstOrNull { it.trackerId == TrackerManager.ANILIST }
                                     ?.remoteId
                                     ?.takeIf { it > 0L }
