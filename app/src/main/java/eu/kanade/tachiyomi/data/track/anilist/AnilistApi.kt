@@ -402,6 +402,70 @@ class AnilistApi(val client: OkHttpClient, interceptor: AnilistInterceptor) {
         }
     }
 
+    /**
+     * Resolves an anime title through AniList without requiring an AniList login.
+     *
+     * Relation data is public, so details pages can show prequels and sequels for
+     * untracked anime as well as for anime whose tracker row came from a backup.
+     */
+    suspend fun findMediaIdByTitle(title: String): Int? {
+        return withIOContext {
+            val query = """
+            |query SearchMedia(${'$'}search: String!) {
+                |Page(perPage: 10) {
+                    |media(search: ${'$'}search, type: ANIME) {
+                        |id
+                        |title {
+                            |userPreferred
+                            |romaji
+                            |english
+                            |native
+                        |}
+                    |}
+                |}
+            |}
+            |
+            """.trimMargin()
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("search", title)
+                }
+            }
+            val body = client.newCall(
+                POST(
+                    API_URL,
+                    body = payload.toString().toRequestBody(jsonMime),
+                ),
+            ).awaitSuccess().body.string()
+
+            val media = json.parseToJsonElement(body)
+                .jsonObject["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")
+                ?.jsonArray
+                .orEmpty()
+            val normalizedTitle = title.normalizeAniListSearchTitle()
+
+            media.mapNotNull { item ->
+                val itemObject = item.jsonObject
+                val id = itemObject["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                val titles = itemObject["title"]?.jsonObject?.values
+                    ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    .orEmpty()
+                id?.let { mediaId ->
+                    mediaId to titles
+                }
+            }.minByOrNull { (_, titles) ->
+                when {
+                    titles.any { it.normalizeAniListSearchTitle() == normalizedTitle } -> 0
+                    titles.any {
+                        val candidate = it.normalizeAniListSearchTitle()
+                        candidate.contains(normalizedTitle) || normalizedTitle.contains(candidate)
+                    } -> 1
+                    else -> 2
+                }
+            }?.first
+        }
+    }
 
     suspend fun getRelations(mediaId: Int): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
         return withIOContext {
@@ -450,6 +514,9 @@ class AnilistApi(val client: OkHttpClient, interceptor: AnilistInterceptor) {
             }
         }
     }
+
+    private fun String.normalizeAniListSearchTitle(): String =
+        lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
 
     fun createOAuth(token: String): ALOAuth {
         return ALOAuth(token, "Bearer", System.currentTimeMillis() + 31536000000, 31536000000)

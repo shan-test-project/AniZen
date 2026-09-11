@@ -1,11 +1,11 @@
 package eu.kanade.tachiyomi.ui.player.utils
 
-private val englishSubtitleTokens = setOf("en", "eng", "english")
-private val japaneseSubtitleTokens = setOf("ja", "jpn", "japanese", "nihongo")
+private val subtitleExtensions = setOf("ass", "ssa", "srt", "vtt", "sub")
 
 /**
- * Jimaku's file API has no language field. Only accept files whose filenames explicitly identify
- * them as English, and never silently treat an unlabelled Japanese file as English.
+ * Jimaku's file API has no language field. Prefer an explicitly labelled English file when one
+ * exists, but allow unlabelled files because Jimaku commonly provides Japanese subtitle files
+ * without an `en` token in the filename.
  */
 internal fun isExplicitlyEnglishSubtitle(filename: String): Boolean {
     val tokens = filename
@@ -13,8 +13,11 @@ internal fun isExplicitlyEnglishSubtitle(filename: String): Boolean {
         .split(Regex("[^a-z0-9]+"))
         .filter { it.isNotEmpty() }
 
-    if (tokens.any { it in japaneseSubtitleTokens }) return false
-    return tokens.any { it in englishSubtitleTokens }
+    return tokens.any { it == "en" || it == "eng" || it == "english" }
+}
+
+internal fun isSupportedSubtitleFile(filename: String): Boolean {
+    return filename.substringAfterLast('.', "").lowercase() in subtitleExtensions
 }
 
 internal fun rankJimakuFile(filename: String): Int {

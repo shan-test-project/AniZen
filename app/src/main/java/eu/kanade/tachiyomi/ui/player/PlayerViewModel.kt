@@ -83,6 +83,7 @@ import eu.kanade.tachiyomi.ui.player.utils.DefaultStreamPreferenceStore
 import eu.kanade.tachiyomi.ui.player.utils.DefaultStreamSelector
 import eu.kanade.tachiyomi.ui.player.utils.JimakuApi
 import eu.kanade.tachiyomi.ui.player.utils.isExplicitlyEnglishSubtitle
+import eu.kanade.tachiyomi.ui.player.utils.isSupportedSubtitleFile
 import eu.kanade.tachiyomi.ui.player.utils.rankJimakuFile
 import eu.kanade.tachiyomi.ui.player.utils.TrackSelect
 import eu.kanade.tachiyomi.ui.reader.SaveImageNotifier
@@ -847,11 +848,12 @@ class PlayerViewModel @JvmOverloads constructor(
                 val entries = api.searchByName(anime.title)
                 val entry = entries.firstOrNull()
                     ?: throw IllegalStateException("No Jimaku entry found for ${anime.title}")
-                val englishFiles = api.getSubtitleFiles(entry.id, episode)
-                    .filter { isExplicitlyEnglishSubtitle(it.name) }
-                val file = englishFiles
+                val subtitleFiles = api.getSubtitleFiles(entry.id, episode)
+                    .filter { isSupportedSubtitleFile(it.name) }
+                val englishFiles = subtitleFiles.filter { isExplicitlyEnglishSubtitle(it.name) }
+                val file = (englishFiles.ifEmpty { subtitleFiles })
                     .maxWithOrNull(compareBy({ rankJimakuFile(it.name) }, { -it.size }))
-                    ?: throw IllegalStateException("No explicitly English Jimaku subtitle found for episode $episode")
+                    ?: throw IllegalStateException("No Jimaku subtitle found for episode $episode")
                 val cached = api.downloadSubtitleToCache(file)
                     ?: throw IllegalStateException("Jimaku subtitle download failed")
                 withUIContext {

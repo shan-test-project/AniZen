@@ -105,11 +105,8 @@ class JimakuApi(
         return request(
             "https://jimaku.cc/api/entries/$entryId/files?episode=$episode",
             { response ->
-                json.decodeFromString<List<JimakuFile>>(response.body.string()).filterNot {
-                    it.name.lowercase().endsWith(".zip") ||
-                        it.name.lowercase().endsWith(".rar") ||
-                        it.name.lowercase().endsWith(".7z")
-                }
+                json.decodeFromString<List<JimakuFile>>(response.body.string())
+                    .filter { isSupportedSubtitleFile(it.name) }
             },
             emptyList(),
         )
