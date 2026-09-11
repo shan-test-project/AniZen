@@ -1896,6 +1896,19 @@ class AnimeScreenModel(
                 }
                 updateAiringTime(anime, trackItems, manualFetch = false)
 
+                // getTracks can emit its initial empty value before the persisted tracker rows
+                // are loaded. Do not mark relations as fetched for that transient state, or the
+                // real AniList track that follows will never trigger a relation request.
+                if (storedTracks.none { it.remoteId > 0L }) {
+                    updateSuccessState {
+                        it.copySuccess(
+                            relations = emptyList<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>().toImmutableList(),
+                            hasFetchedRelations = false,
+                        )
+                    }
+                    return@collectLatest
+                }
+
                 val alreadyFetched = successState?.hasFetchedRelations == true
                 if (!alreadyFetched) {
                     updateSuccessState { it.copySuccess(hasFetchedRelations = true) }
@@ -1904,8 +1917,21 @@ class AnimeScreenModel(
                             // Use every stored tracker row, not only rows belonging to currently
                             // logged-in trackers. This keeps restored/backed-up library entries
                             // eligible for relations.
-                            var relations: List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>? = null
+                            val storedAniListTrack = storedTracks.firstOrNull {
+                                it.trackerId == TrackerManager.ANILIST && it.remoteId > 0L
+                            }
+                            var relations: List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>? =
+                                storedAniListTrack?.let { storedTrack ->
+                                    runCatching {
+                                        trackerManager.aniList.getAnimeRelations(storedTrack.remoteId)
+                                    }.getOrNull()?.takeIf { it.isNotEmpty() }
+                                }
+
+                            // Use other stored trackers only when the linked AniList row did not
+                            // provide relations. This mirrors the working linked-track behavior
+                            // while keeping restored backup entries eligible as a fallback.
                             storedTracks.forEach { storedTrack ->
+                                if (storedTrack.trackerId == TrackerManager.ANILIST) return@forEach
                                 if (relations == null) {
                                     relations = runCatching {
                                         trackerManager.get(storedTrack.trackerId)
@@ -1913,20 +1939,6 @@ class AnimeScreenModel(
                                             ?.getAnimeRelations(storedTrack.toDbTrack())
                                     }.getOrNull()?.takeIf { it.isNotEmpty() }
                                 }
-                            }
-
-                            // AniList relations are public. Use the stored AniList remote ID
-                            // when one exists. Keep this fallback isolated so an AniList outage
-                            // cannot discard relations already returned by another tracker or
-                            // its local cache.
-                            if (relations == null) {
-                                val storedAniListId = storedTracks
-                                    .firstOrNull { it.trackerId == TrackerManager.ANILIST }
-                                    ?.remoteId
-                                    ?.takeIf { it > 0L }
-                                relations = runCatching {
-                                    storedAniListId?.let { trackerManager.aniList.getAnimeRelations(it) }
-                                }.getOrNull()?.takeIf { it.isNotEmpty() }
                             }
 
                             updateSuccessState {
