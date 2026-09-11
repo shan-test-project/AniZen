@@ -1,1 +1,2 @@
 - [AniZen checkout location](anizen-checkout-location.md) — GitHub AniZen sources are checked out at workspace root; the nested anizen/ tree is a separate stale copy.
+- [Jimaku subtitle limitation](jimaku-subtitle-limitation.md) — Jimaku documents itself as a Japanese-subtitle service and its file API has no language metadata.
