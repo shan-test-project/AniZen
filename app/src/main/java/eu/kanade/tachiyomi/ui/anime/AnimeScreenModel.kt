@@ -26,6 +26,7 @@ import eu.kanade.domain.episode.interactor.SyncEpisodesWithSource
 import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.track.interactor.TrackEpisode
 import eu.kanade.domain.track.model.AutoTrackState
+import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.domain.track.model.toDomainTrack
 import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.presentation.anime.DownloadAction
@@ -1896,12 +1897,9 @@ class AnimeScreenModel(
                 }
                 updateAiringTime(anime, trackItems, manualFetch = false)
 
-                // Prefer a stored AniList ID. If no AniList tracker row exists, use the numeric
-                // URL exposed by the AniList extension (its source items use url = media.id).
-                // Only after both direct-ID paths are unavailable do we use the exact-title path.
-                val storedAniListTrack = storedTracks.firstOrNull {
-                    it.trackerId == TrackerManager.ANILIST && it.remoteId > 0L
-                }
+                // Prefer relations from any attached tracker, as some trackers have their own
+                // stable relation IDs. AniList remains the public fallback for trackers without
+                // relation support, imported rows, and untracked anime.
                 val extensionAniListId = sourceManager.getOrStub(anime.source)
                     .name
                     .takeIf { it.equals("AniList", ignoreCase = true) }
@@ -1911,26 +1909,59 @@ class AnimeScreenModel(
                     .takeIf { it.isNotBlank() }
                     ?: anime.title
 
-                when {
-                    storedAniListTrack != null -> {
-                        requestRelations(
-                            key = "anilist:${storedAniListTrack.remoteId}",
-                            request = { trackerManager.aniList.getAnimeRelations(storedAniListTrack.remoteId) },
-                        )
-                    }
-                    extensionAniListId != null -> {
-                        requestRelations(
-                            key = "anilist:$extensionAniListId",
-                            request = { trackerManager.aniList.getAnimeRelations(extensionAniListId) },
-                        )
-                    }
-                    else -> {
-                        requestRelations(
-                            key = "title:$canonicalAnimeTitle",
-                            request = { trackerManager.aniList.getAnimeRelationsByTitle(canonicalAnimeTitle) },
-                        )
-                    }
+                val relationKey = buildString {
+                    append("tracks:")
+                    storedTracks
+                        .sortedWith(compareBy({ it.trackerId }, { it.remoteId }))
+                        .forEach {
+                            append(it.trackerId)
+                            append(':')
+                            append(it.remoteId)
+                            append(';')
+                        }
+                    append("|source:")
+                    append(anime.source)
+                    append("|url:")
+                    append(anime.url)
+                    append("|title:")
+                    append(canonicalAnimeTitle)
                 }
+
+                requestRelations(
+                    key = relationKey,
+                    request = {
+                        var relations: List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>? = null
+
+                        storedTracks.forEach { storedTrack ->
+                            if (relations == null) {
+                                relations = runCatching {
+                                    trackerManager.get(storedTrack.trackerId)
+                                        ?.animeService
+                                        ?.getAnimeRelations(storedTrack.toDbTrack())
+                                }.getOrNull()?.takeIf { it.isNotEmpty() }
+                            }
+                        }
+
+                        if (relations != null) {
+                            relations!!
+                        } else {
+                            val storedAniListId = storedTracks
+                                .firstOrNull {
+                                    it.trackerId == TrackerManager.ANILIST && it.remoteId > 0L
+                                }
+                                ?.remoteId
+
+                            when {
+                                storedAniListId != null ->
+                                    trackerManager.aniList.getAnimeRelations(storedAniListId)
+                                extensionAniListId != null ->
+                                    trackerManager.aniList.getAnimeRelations(extensionAniListId)
+                                else ->
+                                    trackerManager.aniList.getAnimeRelationsByTitle(canonicalAnimeTitle)
+                            }
+                        }
+                    }
+                )
             }
         }
     }
