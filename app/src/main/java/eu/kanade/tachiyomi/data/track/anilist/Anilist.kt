@@ -18,6 +18,8 @@ import eu.kanade.tachiyomi.data.track.model.TrackSearch
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -64,6 +66,9 @@ class Anilist(id: Long) :
 
     private val scorePreference = trackPreferences.anilistScoreType()
     private val preferenceStore: PreferenceStore by injectLazy()
+
+    private val relationsLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
+    private val mediaIdByTitleCache = android.util.LruCache<String, Int>(256)
 
     init {
         // If the preference is an int from APIv1, logout user to force using APIv2
@@ -237,32 +242,35 @@ class Anilist(id: Long) :
     }
 
     suspend fun getAnimeRelations(trackId: Long): List<ALRelationEdge> {
-        val cached = relationsCache[trackId]
-        if (cached != null) return cached
+        val lock = relationsLocks.getOrPut(trackId) { Mutex() }
+        return lock.withLock {
+            val cached = relationsCache[trackId]
+            if (cached != null) return@withLock cached
 
-        // Relation metadata is public and independent of the AniList account. Keep the last
-        // successful result on disk so a temporary AniList outage does not remove the cards
-        // from an already-tracked anime after the app is restarted.
-        val stored = preferenceStore
-            .getString(Preference.appStateKey("anilist_relations_$trackId"))
-            .get()
-            .takeIf { it.isNotBlank() }
-            ?.let { raw ->
-                runCatching { json.decodeFromString<List<ALRelationEdge>>(raw) }.getOrNull()
-            }
-        if (stored != null) {
-            relationsCache[trackId] = stored
-            return stored
-        }
-
-        val fetched = api.getRelations(trackId.toInt())
-        if (fetched.isNotEmpty()) {
-            relationsCache[trackId] = fetched
-            preferenceStore
+            // Relation metadata is public and independent of the AniList account. Keep the last
+            // successful result on disk so a temporary AniList outage does not remove the cards
+            // from an already-tracked anime after the app is restarted.
+            val stored = preferenceStore
                 .getString(Preference.appStateKey("anilist_relations_$trackId"))
-                .set(json.encodeToString(fetched))
+                .get()
+                .takeIf { it.isNotBlank() }
+                ?.let { raw ->
+                    runCatching { json.decodeFromString<List<ALRelationEdge>>(raw) }.getOrNull()
+                }
+            if (stored != null) {
+                relationsCache[trackId] = stored
+                return@withLock stored
+            }
+
+            val fetched = api.getRelations(trackId.toInt())
+            if (fetched.isNotEmpty()) {
+                relationsCache[trackId] = fetched
+                preferenceStore
+                    .getString(Preference.appStateKey("anilist_relations_$trackId"))
+                    .set(json.encodeToString(fetched))
+            }
+            fetched
         }
-        return fetched
     }
 
     /**
@@ -273,7 +281,10 @@ class Anilist(id: Long) :
      * title match; relation cards must not be populated from a guessed search result.
      */
     suspend fun getAnimeRelationsByTitle(title: String): List<ALRelationEdge> {
-        val mediaId = api.findMediaIdByTitle(title) ?: return emptyList()
+        val cacheKey = title.trim()
+        val mediaId = mediaIdByTitleCache.get(cacheKey)
+            ?: api.findMediaIdByTitle(title)?.also { mediaIdByTitleCache.put(cacheKey, it) }
+            ?: return emptyList()
         return getAnimeRelations(mediaId.toLong())
     }
 
@@ -301,6 +312,8 @@ class Anilist(id: Long) :
         trackPreferences.trackToken(this).delete()
         interceptor.setAuth(null)
         relationsCache.clear()
+        relationsLocks.clear()
+        mediaIdByTitleCache.evictAll()
     }
 
     override suspend fun getAnimeMetadata(track: DomainAnimeTrack): eu.kanade.tachiyomi.data.track.model.TrackAnimeMetadata? {
