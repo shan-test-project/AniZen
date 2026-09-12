@@ -159,6 +159,12 @@ class AnimeScreen(
             }
         }
 
+        LaunchedEffect(Unit) {
+            screenModel.openRelatedAnimeFlow.collect { relatedAnimeId ->
+                navigator.push(AnimeScreen(relatedAnimeId))
+            }
+        }
+
         val autoExpandDescription by uiPreferences.autoExpandAnimeDescription().collectAsState()
 
         val vibrantColors by CoverColorObserver.vibrantColors.collectAsState()
@@ -228,6 +234,7 @@ class AnimeScreen(
                     }
                 },
                 onSearch = { query, global -> scope.launch { performSearch(navigator, query, global) } },
+                onRelationClick = screenModel::openRelatedAnimeInSource,
                 onCoverClicked = screenModel::showCoverDialog,
                 onShareClicked = {
                     shareAnime(

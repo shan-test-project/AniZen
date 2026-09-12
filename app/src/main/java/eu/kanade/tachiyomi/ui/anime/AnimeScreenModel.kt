@@ -259,6 +259,37 @@ class AnimeScreenModel(
     private var fetchSuggestionsJob: kotlinx.coroutines.Job? = null
     private val suggestionsDispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(3)
 
+    private val _openRelatedAnimeFlow = kotlinx.coroutines.flow.MutableSharedFlow<Long>(extraBufferCapacity = 1)
+    val openRelatedAnimeFlow = _openRelatedAnimeFlow.asSharedFlow()
+
+    /**
+     * Resolves a tapped prequel/sequel AniList relation to an entry in the anime's
+     * own current extension and emits its local anime ID for direct navigation.
+     * Does not fall back to a global search when the extension has no match.
+     */
+    fun openRelatedAnimeInSource(title: String) {
+        val state = successState ?: return
+        val catalogueSource = state.source as? AnimeCatalogueSource ?: return
+        screenModelScope.launchIO {
+            try {
+                val searchResult = catalogueSource.getSearchAnime(1, title, catalogueSource.getFilterList())
+                val cleanTarget = eu.kanade.tachiyomi.util.lang.StringSimilarity.cleanTitle(title)
+                val bestMatch = searchResult.animes
+                    .maxByOrNull { candidate ->
+                        eu.kanade.tachiyomi.util.lang.StringSimilarity.tokenSortRatio(
+                            cleanTarget,
+                            eu.kanade.tachiyomi.util.lang.StringSimilarity.cleanTitle(candidate.title),
+                        )
+                    }
+                    ?: return@launchIO
+                val localAnime = networkToLocalAnime.await(bestMatch.toDomainAnime(state.anime.source))
+                _openRelatedAnimeFlow.tryEmit(localAnime.id)
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Could not resolve related anime '$title' in current source" }
+            }
+        }
+    }
+
     private fun State.Success.copySuccess(
         anime: Anime = this.anime,
         episodes: List<EpisodeList.Item> = this.episodes,

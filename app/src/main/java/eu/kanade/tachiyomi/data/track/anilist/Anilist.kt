@@ -256,8 +256,8 @@ class Anilist(id: Long) :
         }
 
         val fetched = api.getRelations(trackId.toInt())
-        relationsCache[trackId] = fetched
         if (fetched.isNotEmpty()) {
+            relationsCache[trackId] = fetched
             preferenceStore
                 .getString(Preference.appStateKey("anilist_relations_$trackId"))
                 .set(json.encodeToString(fetched))

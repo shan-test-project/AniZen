@@ -175,6 +175,7 @@ fun AnimeScreen(
     onRefresh: () -> Unit,
     onContinueWatching: (tachiyomi.domain.anime.model.SeasonAnime?) -> Unit,
     onSearch: (query: String, global: Boolean) -> Unit,
+    onRelationClick: (String) -> Unit,
     onCoverClicked: () -> Unit,
     onShareClicked: (() -> Unit)?,
     onDownloadActionClicked: ((DownloadAction) -> Unit)?,
@@ -248,6 +249,7 @@ fun AnimeScreen(
             onRefresh = onRefresh,
             onContinueWatching = onContinueWatching,
             onSearch = onSearch,
+            onRelationClick = onRelationClick,
             onCoverClicked = onCoverClicked,
             onSeasonSelected = onSeasonSelected,
             // AY -->
@@ -304,6 +306,7 @@ fun AnimeScreen(
             onRefresh = onRefresh,
             onContinueWatching = onContinueWatching,
             onSearch = onSearch,
+            onRelationClick = onRelationClick,
             onCoverClicked = onCoverClicked,
             onSeasonSelected = onSeasonSelected,
             // AY -->
@@ -374,6 +377,7 @@ private fun AnimeScreenSmallImpl(
     onRefresh: () -> Unit,
     onContinueWatching: (tachiyomi.domain.anime.model.SeasonAnime?) -> Unit,
     onSearch: (query: String, global: Boolean) -> Unit,
+    onRelationClick: (String) -> Unit,
     onCoverClicked: () -> Unit,
     onShareClicked: (() -> Unit)?,
     onDownloadActionClicked: ((DownloadAction) -> Unit)?,
@@ -656,7 +660,7 @@ private fun AnimeScreenSmallImpl(
                                     eu.kanade.presentation.anime.components.PrequelSequelBox(
                                         anime = state.anime,
                                         relations = state.relations,
-                                        onRelationClick = { onSearch(it, true) },
+                                        onRelationClick = onRelationClick,
                                     )
                                 }
 
@@ -885,6 +889,7 @@ fun AnimeScreenLargeImpl(
     onRefresh: () -> Unit,
     onContinueWatching: (tachiyomi.domain.anime.model.SeasonAnime?) -> Unit,
     onSearch: (query: String, global: Boolean) -> Unit,
+    onRelationClick: (String) -> Unit,
     onCoverClicked: () -> Unit,
     onShareClicked: (() -> Unit)?,
     onDownloadActionClicked: ((DownloadAction) -> Unit)?,
@@ -1149,7 +1154,7 @@ fun AnimeScreenLargeImpl(
                                     eu.kanade.presentation.anime.components.PrequelSequelBox(
                                         anime = state.anime,
                                         relations = state.relations,
-                                        onRelationClick = { onSearch(it, true) }
+                                        onRelationClick = onRelationClick
                                     )
 
                                     // Cast Row — placed below tags
