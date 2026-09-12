@@ -402,6 +402,63 @@ class AnilistApi(val client: OkHttpClient, interceptor: AnilistInterceptor) {
         }
     }
 
+    /**
+     * Returns an AniList media ID only when exactly one returned media item has an exact
+     * match in one of its canonical title fields. The extension's source uses the same
+     * AniList title fields for search results; unlike a normal search, this deliberately
+     * refuses to select a merely similar result.
+     */
+    suspend fun findMediaIdByTitle(title: String): Int? {
+        return withIOContext {
+            val query = """
+            |query SearchMedia(${'$'}search: String!) {
+                |Page(page: 1, perPage: 20) {
+                    |media(search: ${'$'}search, type: ANIME) {
+                        |id
+                        |title {
+                            |userPreferred
+                            |romaji
+                            |english
+                            |native
+                        |}
+                    |}
+                |}
+            |}
+            |
+            """.trimMargin()
+            val payload = buildJsonObject {
+                put("query", query)
+                putJsonObject("variables") {
+                    put("search", title)
+                }
+            }
+            val body = client.newCall(
+                POST(
+                    API_URL,
+                    body = payload.toString().toRequestBody(jsonMime),
+                ),
+            ).awaitSuccess().body.string()
+
+            val media = json.parseToJsonElement(body)
+                .jsonObject["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")
+                ?.jsonArray
+                .orEmpty()
+            val normalizedTitle = title.normalizeAniListSearchTitle()
+
+            val exactMediaIds = media.mapNotNull { item ->
+                val itemObject = item.jsonObject
+                val id = itemObject["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                val titles = itemObject["title"]?.jsonObject?.values
+                    ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    .orEmpty()
+                id?.takeIf {
+                    titles.any { it.normalizeAniListSearchTitle() == normalizedTitle }
+                }
+            }.distinct()
+
+            exactMediaIds.singleOrNull()
+        }
+    }
 
     suspend fun getRelations(mediaId: Int): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
         return withIOContext {
@@ -450,6 +507,12 @@ class AnilistApi(val client: OkHttpClient, interceptor: AnilistInterceptor) {
             }
         }
     }
+
+    private fun String.normalizeAniListSearchTitle(): String =
+        lowercase()
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
 
     fun createOAuth(token: String): ALOAuth {
         return ALOAuth(token, "Bearer", System.currentTimeMillis() + 31536000000, 31536000000)

@@ -26,7 +26,6 @@ import eu.kanade.domain.episode.interactor.SyncEpisodesWithSource
 import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.track.interactor.TrackEpisode
 import eu.kanade.domain.track.model.AutoTrackState
-import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.domain.track.model.toDomainTrack
 import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.presentation.anime.DownloadAction
@@ -219,6 +218,7 @@ class AnimeScreenModel(
 ) : StateScreenModel<AnimeScreenModel.State>(State.Loading) {
 
     private val castFetchAttempts = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private var relationRequestKey: String? = null
 
     private val successState: State.Success?
         get() = state.value as? State.Success
@@ -1896,63 +1896,70 @@ class AnimeScreenModel(
                 }
                 updateAiringTime(anime, trackItems, manualFetch = false)
 
-                // getTracks can emit its initial empty value before the persisted tracker rows
-                // are loaded. Do not mark relations as fetched for that transient state, or the
-                // real AniList track that follows will never trigger a relation request.
-                if (storedTracks.none { it.remoteId > 0L }) {
+                // Prefer a stored AniList ID. If no AniList tracker row exists, use the numeric
+                // URL exposed by the AniList extension (its source items use url = media.id).
+                // Only after both direct-ID paths are unavailable do we use the exact-title path.
+                val storedAniListTrack = storedTracks.firstOrNull {
+                    it.trackerId == TrackerManager.ANILIST && it.remoteId > 0L
+                }
+                val extensionAniListId = sourceManager.getOrStub(anime.source)
+                    .name
+                    .takeIf { it.equals("AniList", ignoreCase = true) }
+                    ?.let { anime.url.toLongOrNull() }
+                    ?.takeIf { it > 0L }
+                val canonicalAnimeTitle = anime.ogTitle
+                    .takeIf { it.isNotBlank() }
+                    ?: anime.title
+
+                when {
+                    storedAniListTrack != null -> {
+                        requestRelations(
+                            key = "anilist:${storedAniListTrack.remoteId}",
+                            request = { trackerManager.aniList.getAnimeRelations(storedAniListTrack.remoteId) },
+                        )
+                    }
+                    extensionAniListId != null -> {
+                        requestRelations(
+                            key = "anilist:$extensionAniListId",
+                            request = { trackerManager.aniList.getAnimeRelations(extensionAniListId) },
+                        )
+                    }
+                    else -> {
+                        requestRelations(
+                            key = "title:$canonicalAnimeTitle",
+                            request = { trackerManager.aniList.getAnimeRelationsByTitle(canonicalAnimeTitle) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun requestRelations(
+        key: String,
+        request: suspend () -> List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>,
+    ) {
+        if (relationRequestKey == key) return
+        relationRequestKey = key
+        updateSuccessState { it.copySuccess(hasFetchedRelations = true) }
+
+        screenModelScope.launchIO {
+            try {
+                val relations = request()
+                // A direct tracker/source ID can supersede an earlier title lookup. Do not let
+                // the slower title request overwrite the verified result.
+                if (relationRequestKey == key) {
+                    updateSuccessState { it.copySuccess(relations = relations.toImmutableList()) }
+                }
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e)
+                if (relationRequestKey == key) {
+                    relationRequestKey = null
                     updateSuccessState {
                         it.copySuccess(
                             relations = emptyList<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>().toImmutableList(),
                             hasFetchedRelations = false,
                         )
-                    }
-                    return@collectLatest
-                }
-
-                val alreadyFetched = successState?.hasFetchedRelations == true
-                if (!alreadyFetched) {
-                    updateSuccessState { it.copySuccess(hasFetchedRelations = true) }
-                    screenModelScope.launchIO {
-                        try {
-                            // Use every stored tracker row, not only rows belonging to currently
-                            // logged-in trackers. This keeps restored/backed-up library entries
-                            // eligible for relations.
-                            val storedAniListTrack = storedTracks.firstOrNull {
-                                it.trackerId == TrackerManager.ANILIST && it.remoteId > 0L
-                            }
-                            var relations: List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>? =
-                                storedAniListTrack?.let { storedTrack ->
-                                    runCatching {
-                                        trackerManager.aniList.getAnimeRelations(storedTrack.remoteId)
-                                    }.getOrNull()?.takeIf { it.isNotEmpty() }
-                                }
-
-                            // Use other stored trackers only when the linked AniList row did not
-                            // provide relations. This mirrors the working linked-track behavior
-                            // while keeping restored backup entries eligible as a fallback.
-                            storedTracks.forEach { storedTrack ->
-                                if (storedTrack.trackerId == TrackerManager.ANILIST) return@forEach
-                                if (relations == null) {
-                                    relations = runCatching {
-                                        trackerManager.get(storedTrack.trackerId)
-                                            ?.animeService
-                                            ?.getAnimeRelations(storedTrack.toDbTrack())
-                                    }.getOrNull()?.takeIf { it.isNotEmpty() }
-                                }
-                            }
-
-                            updateSuccessState {
-                                it.copySuccess(relations = (relations ?: emptyList()).toImmutableList())
-                            }
-                        } catch (e: Exception) {
-                            logcat(LogPriority.ERROR, e)
-                            updateSuccessState {
-                                it.copySuccess(
-                                    relations = emptyList<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>().toImmutableList(),
-                                    hasFetchedRelations = false,
-                                )
-                            }
-                        }
                     }
                 }
             }

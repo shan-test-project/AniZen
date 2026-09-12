@@ -265,6 +265,18 @@ class Anilist(id: Long) :
         return fetched
     }
 
+    /**
+     * Resolves an untracked anime only when AniList has one exact title match.
+     *
+     * The resolved media ID is then handled by the same persistent relation cache as tracked
+     * anime. An empty result is intentional when AniList returns no exact or more than one exact
+     * title match; relation cards must not be populated from a guessed search result.
+     */
+    suspend fun getAnimeRelationsByTitle(title: String): List<ALRelationEdge> {
+        val mediaId = api.findMediaIdByTitle(title) ?: return emptyList()
+        return getAnimeRelations(mediaId.toLong())
+    }
+
     suspend fun getUserAnimeList(): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALUserListItem> {
         return api.getUserAnimeList(getUsername().toInt())
     }
