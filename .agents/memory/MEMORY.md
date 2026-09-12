@@ -1,0 +1,1 @@
+- [AniList request quota](anilist-api-limits.md) — authenticated and public GraphQL requests share AniList's quota and must use one limiter.
