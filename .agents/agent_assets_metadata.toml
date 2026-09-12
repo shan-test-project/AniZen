@@ -28,3 +28,17 @@ mtime_ms = 1789126494000
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:e2a5fc9b-c53f-4465-b1d1-3e3a98a9aeb9/0cb93a30-0d90-4312-8e06-efc61cc0f4e6/c5d61730-cd39-4743-9e6a-a8a1ef03ca51"
 storage_version_token = "1789126704290463"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "CIcMluh4WkfbqEz4c4sbX"
+uri = "file://artifacts/anizen-v0.5.226-v8a-r8-debug/AniZen-v0.5.226-v8a-r8-debug.apk"
+type = "unspecified"
+title = "AniZen v0.5.226 arm64-v8a R8 debug APK"
+description = "Built from commit 90f289bb with direct AniList media-ID lookup, exact-title fallback, persistent relation caching, arm64-v8a only, full R8, resource shrinking, compressed native libraries, telemetry/updater disabled, and debug signing."
+logical_id = "3c911fb0-ff82-4e4c-a4bb-8d8584bea13c"
+content_hash = "sha256:eb3223e8a4577c5597cac013010d0c6cda0c2ff14926cc534832d0e31a646ac7"
+size = 51675140
+mtime_ms = 1789189816000
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:e2a5fc9b-c53f-4465-b1d1-3e3a98a9aeb9/3c911fb0-ff82-4e4c-a4bb-8d8584bea13c/2fa6a8b2-cdd0-47f6-a227-2ddd36e6e4fc"
+storage_version_token = "1789190059685884"
+content_type = "application/octet-stream"

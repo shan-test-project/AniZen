@@ -11,5 +11,6 @@ unavailable.
 **Why:** AniList outages otherwise make relation cards disappear after an app restart even
 though the anime remains tracked.
 
-**How to apply:** Prefer stored tracker IDs and cached relation metadata; isolate failed
-tracker/network lookups so one unavailable provider does not suppress results from another.
+**How to apply:** Prefer stored tracker IDs and cached relation metadata; for AniList-source
+items use the numeric source URL as the media ID; title fallback must require one exact
+canonical-title match and never choose a merely similar result.
