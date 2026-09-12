@@ -281,11 +281,24 @@ class Anilist(id: Long) :
      * title match; relation cards must not be populated from a guessed search result.
      */
     suspend fun getAnimeRelationsByTitle(title: String): List<ALRelationEdge> {
-        val cacheKey = title.trim()
-        val mediaId = mediaIdByTitleCache.get(cacheKey)
-            ?: api.findMediaIdByTitle(title)?.also { mediaIdByTitleCache.put(cacheKey, it) }
-            ?: return emptyList()
-        return getAnimeRelations(mediaId.toLong())
+        return getAnimeRelationsByTitles(listOf(title))
+    }
+
+    /**
+     * Resolves relation data from title candidates without selecting a merely
+     * similar AniList result. A custom/display title can differ from the
+     * original source title, so callers may provide both.
+     */
+    suspend fun getAnimeRelationsByTitles(titles: List<String>): List<ALRelationEdge> {
+        for (title in titles.map(String::trim).filter(String::isNotBlank).distinct()) {
+            val cacheKey = title
+            val mediaId = mediaIdByTitleCache.get(cacheKey)
+                ?: api.findMediaIdByTitle(title)?.also { mediaIdByTitleCache.put(cacheKey, it) }
+                ?: continue
+            val relations = getAnimeRelations(mediaId.toLong())
+            if (relations.isNotEmpty()) return relations
+        }
+        return emptyList()
     }
 
     suspend fun getUserAnimeList(): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALUserListItem> {

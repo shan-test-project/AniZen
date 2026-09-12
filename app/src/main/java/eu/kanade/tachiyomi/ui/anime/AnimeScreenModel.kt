@@ -1938,9 +1938,9 @@ class AnimeScreenModel(
                     .takeIf { it.equals("AniList", ignoreCase = true) }
                     ?.let { anime.url.toLongOrNull() }
                     ?.takeIf { it > 0L }
-                val canonicalAnimeTitle = anime.ogTitle
-                    .takeIf { it.isNotBlank() }
-                    ?: anime.title
+                val relationTitleCandidates = listOf(anime.title, anime.ogTitle)
+                    .filter { it.isNotBlank() }
+                    .distinct()
 
                 when {
                     storedAniListTrack != null -> {
@@ -1957,8 +1957,12 @@ class AnimeScreenModel(
                     }
                     else -> {
                         requestRelations(
-                            key = "title:$canonicalAnimeTitle",
-                            request = { trackerManager.aniList.getAnimeRelationsByTitle(canonicalAnimeTitle) },
+                            key = "titles:${relationTitleCandidates.joinToString("|")}",
+                            request = {
+                                trackerManager.aniList.getAnimeRelationsByTitles(
+                                    relationTitleCandidates,
+                                )
+                            },
                         )
                     }
                 }
