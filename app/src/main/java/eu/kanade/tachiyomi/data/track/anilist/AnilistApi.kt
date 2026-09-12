@@ -40,9 +40,18 @@ class AnilistApi(val client: OkHttpClient, interceptor: AnilistInterceptor) {
 
     private val json: Json by injectLazy()
 
-    private val authClient = client.newBuilder()
+    /*
+     * AniList applies its request quota across authenticated and public GraphQL
+     * requests. Relations and title resolution used to use the base client,
+     * bypassing the tracker limiter and making a later track mutation fail with
+     * HTTP 429. Keep both clients on the same limiter instance.
+     */
+    private val rateLimitedClient = client.newBuilder()
+        .rateLimit(permits = 80, period = 1.minutes)
+        .build()
+
+    private val authClient = rateLimitedClient.newBuilder()
         .addInterceptor(interceptor)
-        .rateLimit(permits = 85, period = 1.minutes)
         .build()
 
     suspend fun addLibAnime(track: Track): Track {
@@ -432,7 +441,7 @@ class AnilistApi(val client: OkHttpClient, interceptor: AnilistInterceptor) {
                     put("search", title)
                 }
             }
-            val body = client.newCall(
+            val body = rateLimitedClient.newCall(
                 POST(
                     API_URL,
                     body = payload.toString().toRequestBody(jsonMime),
@@ -493,7 +502,7 @@ class AnilistApi(val client: OkHttpClient, interceptor: AnilistInterceptor) {
                 }
             }
             with(json) {
-                client.newCall(
+                rateLimitedClient.newCall(
                     POST(
                         API_URL,
                         body = payload.toString().toRequestBody(jsonMime),
@@ -501,8 +510,8 @@ class AnilistApi(val client: OkHttpClient, interceptor: AnilistInterceptor) {
                 )
                     .awaitSuccess()
                     .parseAs<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationResult>()
-                    .data.Media?.relations?.edges?.filter { 
-                        it.relationType == "PREQUEL" || it.relationType == "SEQUEL" 
+                    .data.Media?.relations?.edges?.filter {
+                        it.relationType == "PREQUEL" || it.relationType == "SEQUEL"
                     } ?: emptyList()
             }
         }

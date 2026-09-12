@@ -18,6 +18,7 @@ The format is a modified version of [Keep a Changelog](https://keepachangelog.co
 
 ### Fixed
 
+- prevent AniList relation requests from bypassing the tracker rate limiter, and resolve untracked relations using display and original title candidates
 - resolve 0MB downloads by adding support for HLS master playlists in native engine
 - ensure new episodes are enqueued for download when 'Auto download' is enabled
 - decrease long-press speed sliding sensitivity
