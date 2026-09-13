@@ -646,6 +646,7 @@ private fun AnimeScreenSmallImpl(
 
                                 item(key = "description-small", contentType = AnimeScreenItem.DESCRIPTION_WITH_TAG) {
                                     ExpandableAnimeDescription(
+                                        animeId = state.anime.id,
                                         modifier = Modifier.padding(bottom = 8.dp),
                                         defaultExpandState = autoExpandDescription,
                                         description = state.anime.description,
@@ -1143,6 +1144,7 @@ fun AnimeScreenLargeImpl(
                                     )
 
                                     ExpandableAnimeDescription(
+                                        animeId = state.anime.id,
                                         defaultExpandState = autoExpandDescription,
                                         description = state.anime.description,
                                         note = state.anime.note,

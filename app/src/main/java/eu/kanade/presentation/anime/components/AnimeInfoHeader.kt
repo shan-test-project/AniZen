@@ -68,6 +68,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -106,6 +107,8 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.track.AnimeTracker
 import eu.kanade.tachiyomi.source.model.SAnime
 import eu.kanade.tachiyomi.ui.anime.track.TrackItem
+import eu.kanade.tachiyomi.ui.player.settings.TtsPreferences
+import eu.kanade.tachiyomi.util.tts.AnimeDescriptionTtsController
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.presentation.anime.components.AnimeCover
@@ -353,6 +356,7 @@ fun AnimeActionRow(
 
 @Composable
 fun ExpandableAnimeDescription(
+    animeId: Long,
     defaultExpandState: Boolean,
     description: String?,
     note: String?,
@@ -361,6 +365,31 @@ fun ExpandableAnimeDescription(
     onCopyTagToClipboard: (tag: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val ttsPreferences = remember { Injekt.get<TtsPreferences>() }
+    val ttsController = rememberAnimeDescriptionTtsController()
+    val hasDescription = !description.isNullOrBlank()
+    val ttsEnabled = ttsPreferences.enableTts().get()
+    val canSpeak = hasDescription &&
+        ttsEnabled &&
+        ttsController.availability == AnimeDescriptionTtsController.Availability.AVAILABLE
+
+    LaunchedEffect(
+        animeId,
+        description,
+        ttsEnabled,
+        ttsController.availability,
+    ) {
+        if (hasDescription && ttsEnabled && ttsPreferences.autoPlaySummary().get()) {
+            if (ttsController.availability == AnimeDescriptionTtsController.Availability.AVAILABLE) {
+                ttsController.speak(
+                    text = description.orEmpty(),
+                    speed = ttsPreferences.ttsSpeed().get(),
+                    voiceName = ttsPreferences.ttsVoiceName().get(),
+                )
+            }
+        }
+    }
+
     val (expanded, onExpanded) = rememberSaveable {
         mutableStateOf(defaultExpandState)
     }
@@ -386,13 +415,31 @@ fun ExpandableAnimeDescription(
             )
         }
 
-        AnimeSummary(
-            description = desc,
-            expanded = expanded,
-            onExpand = { onExpanded(!expanded) },
-            modifier = Modifier
-                .padding(horizontal = 16.dp),
-        )
+        Row(
+            verticalAlignment = Alignment.Top,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        ) {
+            AnimeSummary(
+                description = desc,
+                expanded = expanded,
+                onExpand = { onExpanded(!expanded) },
+                activeRange = ttsController.activeRange,
+                effectsEnabled = ttsPreferences.enableVisualEffects().get(),
+                modifier = Modifier.weight(1f),
+            )
+            TtsPlayButton(
+                visible = canSpeak,
+                isSpeaking = ttsController.isSpeaking,
+                onPlay = {
+                    ttsController.speak(
+                        text = description.orEmpty(),
+                        speed = ttsPreferences.ttsSpeed().get(),
+                        voiceName = ttsPreferences.ttsVoiceName().get(),
+                    )
+                },
+                onStop = ttsController::stop,
+            )
+        }
         val tags = tagsProvider()
         if (!tags.isNullOrEmpty()) {
             Box(
@@ -816,6 +863,8 @@ private fun AnimeSummary(
     description: String,
     expanded: Boolean,
     onExpand: () -> Unit,
+    activeRange: IntRange?,
+    effectsEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val backgroundColor = MaterialTheme.colorScheme.background
@@ -836,29 +885,41 @@ private fun AnimeSummary(
                     .fillMaxWidth()
                     .then(if (!expanded) Modifier.height(80.dp) else Modifier),
             ) {
-                MarkdownRender(
-                    content = description,
-                    modifier = Modifier
-                        .secondaryItemAlpha()
-                        .padding(bottom = if (expanded) 24.dp else 0.dp)
-                        .drawWithContent {
-                            drawContent()
-                            if (!expanded) {
-                                val gradientHeight = 24.dp.toPx()
-                                drawRect(
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.Transparent,
-                                            backgroundColor,
+                if (activeRange != null && effectsEnabled) {
+                    AnimatedTtsText(
+                        text = description,
+                        activeRange = activeRange,
+                        effectsEnabled = true,
+                        modifier = Modifier
+                            .secondaryItemAlpha()
+                            .padding(bottom = if (expanded) 24.dp else 0.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                } else {
+                    MarkdownRender(
+                        content = description,
+                        modifier = Modifier
+                            .secondaryItemAlpha()
+                            .padding(bottom = if (expanded) 24.dp else 0.dp)
+                            .drawWithContent {
+                                drawContent()
+                                if (!expanded) {
+                                    val gradientHeight = 24.dp.toPx()
+                                    drawRect(
+                                        brush = Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                backgroundColor,
+                                            ),
+                                            startY = size.height - gradientHeight,
+                                            endY = size.height,
                                         ),
-                                        startY = size.height - gradientHeight,
-                                        endY = size.height,
-                                    ),
-                                )
-                            }
-                        },
-                    annotator = descriptionAnnotator,
-                )
+                                    )
+                                }
+                            },
+                        annotator = descriptionAnnotator,
+                    )
+                }
             }
         }
 

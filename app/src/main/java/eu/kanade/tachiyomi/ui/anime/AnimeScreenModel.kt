@@ -49,6 +49,7 @@ import eu.kanade.tachiyomi.ui.player.loader.HosterLoader
 import eu.kanade.tachiyomi.ui.player.settings.GesturePreferences
 import eu.kanade.tachiyomi.ui.player.settings.PlayerPreferences
 import eu.kanade.tachiyomi.animesource.model.FetchType
+import eu.kanade.tachiyomi.data.track.myanimelist.JikanApi
 import eu.kanade.tachiyomi.util.AniChartApi
 import eu.kanade.tachiyomi.util.episode.EpisodeSeasonUtils
 import eu.kanade.tachiyomi.util.episode.getNextUnseen
@@ -219,6 +220,7 @@ class AnimeScreenModel(
 
     private val castFetchAttempts = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private var relationRequestKey: String? = null
+    private val jikanApi = JikanApi()
 
     private val successState: State.Success?
         get() = state.value as? State.Success
@@ -1923,7 +1925,14 @@ class AnimeScreenModel(
                 // Character data is independent of tracker airing data. Start it
                 // immediately so a slow tracker cannot block the first card render.
                 screenModelScope.launchIO {
-                    fetchCastForAnime(successState?.anime ?: anime)
+                    fetchCastForAnime(
+                        anime = successState?.anime ?: anime,
+                        aniListId = storedTracks
+                            .firstOrNull {
+                                it.trackerId == TrackerManager.ANILIST && it.remoteId > 0L
+                            }
+                            ?.remoteId,
+                    )
                 }
                 updateAiringTime(anime, trackItems, manualFetch = false)
 
@@ -1941,18 +1950,32 @@ class AnimeScreenModel(
                 val relationTitleCandidates = listOf(anime.title, anime.ogTitle)
                     .filter { it.isNotBlank() }
                     .distinct()
+                val relationAniListId = storedAniListTrack?.remoteId
+                    ?: extensionAniListId
 
                 when {
                     storedAniListTrack != null -> {
                         requestRelations(
                             key = "anilist:${storedAniListTrack.remoteId}",
                             request = { trackerManager.aniList.getAnimeRelations(storedAniListTrack.remoteId) },
+                            fallback = {
+                                fetchRelationsFromJikanFallback(
+                                    aniListId = relationAniListId,
+                                    titleCandidates = relationTitleCandidates,
+                                )
+                            },
                         )
                     }
                     extensionAniListId != null -> {
                         requestRelations(
                             key = "anilist:$extensionAniListId",
                             request = { trackerManager.aniList.getAnimeRelations(extensionAniListId) },
+                            fallback = {
+                                fetchRelationsFromJikanFallback(
+                                    aniListId = relationAniListId,
+                                    titleCandidates = relationTitleCandidates,
+                                )
+                            },
                         )
                     }
                     else -> {
@@ -1961,6 +1984,12 @@ class AnimeScreenModel(
                             request = {
                                 trackerManager.aniList.getAnimeRelationsByTitles(
                                     relationTitleCandidates,
+                                )
+                            },
+                            fallback = {
+                                fetchRelationsFromJikanFallback(
+                                    aniListId = relationAniListId,
+                                    titleCandidates = relationTitleCandidates,
                                 )
                             },
                         )
@@ -1973,6 +2002,9 @@ class AnimeScreenModel(
     private fun requestRelations(
         key: String,
         request: suspend () -> List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge>,
+        fallback: suspend () -> List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> = {
+            emptyList()
+        },
     ) {
         if (relationRequestKey == key) return
         relationRequestKey = key
@@ -1980,7 +2012,7 @@ class AnimeScreenModel(
 
         screenModelScope.launchIO {
             try {
-                val relations = request()
+                val relations = request().ifEmpty { fallback() }
                 // A direct tracker/source ID can supersede an earlier title lookup. Do not let
                 // the slower title request overwrite the verified result.
                 if (relationRequestKey == key) {
@@ -2001,7 +2033,15 @@ class AnimeScreenModel(
         }
     }
 
-    private suspend fun fetchCastForAnime(anime: Anime) {
+    private suspend fun fetchRelationsFromJikanFallback(
+        aniListId: Long?,
+        titleCandidates: List<String>,
+    ): List<eu.kanade.tachiyomi.data.track.anilist.dto.ALRelationEdge> {
+        val malId = jikanApi.resolveMalId(aniListId, titleCandidates) ?: return emptyList()
+        return jikanApi.getRelations(malId)
+    }
+
+    private suspend fun fetchCastForAnime(anime: Anime, aniListId: Long? = null) {
         // Credits are metadata, not tracking data. Keep them in the database
         // cache for tracked and non-tracked anime so reopening a details screen
         // never needs to repeat the network request.
@@ -2017,14 +2057,27 @@ class AnimeScreenModel(
         }
 
         val now = System.currentTimeMillis()
-        val attemptKey = "${anime.id}:anilist"
+        val attemptKey = "${anime.id}:metadata"
         val lastAttempt = castFetchAttempts[attemptKey] ?: 0L
         if (now - lastAttempt < CAST_RETRY_INTERVAL_MS) return
         castFetchAttempts[attemptKey] = now
 
         try {
+            val resolvedAniListId = aniListId ?: sourceManager.getOrStub(anime.source)
+                .name
+                .takeIf { it.equals("AniList", ignoreCase = true) }
+                ?.let { anime.url.toLongOrNull() }
+                ?.takeIf { it > 0L }
+            val titleCandidates = listOf(anime.title, anime.ogTitle)
+                .filter { it.isNotBlank() }
+                .distinct()
+
             val cast = trackerManager.aniList.fetchCastForAnimeTitle(anime.title)
-            if (cast.isNullOrEmpty()) return
+                ?.takeIf { it.isNotEmpty() }
+                ?: jikanApi.resolveMalId(resolvedAniListId, titleCandidates)
+                    ?.let { jikanApi.getCharacters(it) }
+                    ?.takeIf { it.isNotEmpty() }
+                ?: return
 
             castCache.put(anime.id, cast)
             updateAnime.await(AnimeUpdate(id = anime.id, cast = cast))

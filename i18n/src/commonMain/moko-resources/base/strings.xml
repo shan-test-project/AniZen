@@ -364,6 +364,17 @@
     <string name="pref_player_subtitle_whitelist_info">Whitelist for subtitles. If a whitelist is defined, the first subtitle that contains a whitelisted word will be used. Multiple values can be delimited by a comma.</string>
     <string name="pref_player_subtitle_blacklist">Blacklist</string>
     <string name="pref_player_subtitle_blacklist_info">Blacklist for subtitles. If a blacklist is defined, all subtitles that contains a blacklisted word will be filtered out. Multiple values can be delimited by a comma.</string>
+    <string name="pref_tts_enabled">Enable Text-to-Speech</string>
+    <string name="pref_tts_enabled_summary">Read anime descriptions aloud on the details screen</string>
+    <string name="pref_tts_speed">Speech speed</string>
+    <string name="pref_tts_voice">Voice selection</string>
+    <string name="pref_tts_voice_unavailable">No offline voices are available on this device</string>
+    <string name="pref_tts_autoplay">Auto-play summary</string>
+    <string name="pref_tts_autoplay_summary">Start reading when an anime details screen opens</string>
+    <string name="pref_tts_visual_effects">Enable visual effects</string>
+    <string name="pref_tts_visual_effects_summary">Underline and animate the currently spoken text</string>
+    <string name="tts_read_summary">Read description aloud</string>
+    <string name="tts_stop_reading">Stop reading description</string>
     <string name="pref_disable_auto_subtitles">Disable auto subtitle selection</string>
     <string name="pref_disable_auto_subtitles_summary">Do not automatically select any subtitle track when loading a video</string>
     <string name="player_sheets_sub_fit_to_video">Fit subtitles into video size</string>
