@@ -17,14 +17,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.graphicsLayer
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.unit.dp
 import eu.kanade.tachiyomi.util.tts.AnimeDescriptionTtsController
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
@@ -77,6 +77,7 @@ fun AnimatedTtsText(
 
     val safeStart = activeRange.first.coerceIn(0, text.length)
     val safeEnd = (activeRange.last + 1).coerceIn(safeStart, text.length)
+    val density = LocalDensity.current.density
     val transition = rememberInfiniteTransition(label = "tts-wave")
     val phase by transition.animateFloat(
         initialValue = 0f,
@@ -104,7 +105,7 @@ fun AnimatedTtsText(
                     ),
                     style = style,
                     modifier = Modifier.graphicsLayer {
-                        translationY = yOffset.dp.toPx()
+                        translationY = yOffset * density
                     },
                 )
             }

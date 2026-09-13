@@ -34,14 +34,15 @@ object PlayerSettingsSubtitleScreen : SearchableSettings {
         var voices by remember { mutableStateOf(emptyList<android.speech.tts.Voice>()) }
 
         DisposableEffect(context) {
-            val tts = TextToSpeech(context) { status ->
+            var tts: TextToSpeech? = null
+            tts = TextToSpeech(context) { status ->
                 if (status == TextToSpeech.SUCCESS) {
-                    voices = tts.voices
+                    voices = tts?.voices
                         .orEmpty()
                         .sortedWith(compareBy({ it.locale.displayName }, { it.name }))
                 }
             }
-            onDispose { tts.shutdown() }
+            onDispose { tts?.shutdown() }
         }
 
         val langPref = subtitlePreferences.preferredSubLanguages()

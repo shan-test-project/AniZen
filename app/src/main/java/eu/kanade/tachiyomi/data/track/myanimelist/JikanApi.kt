@@ -58,7 +58,7 @@ class JikanApi(
                 .appendQueryParameter("q", title)
                 .appendQueryParameter("limit", "1")
                 .build()
-            val request = Request.Builder().url(url).build()
+            val request = Request.Builder().url(url.toString()).build()
             networkHelper.client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@use null
                 json.decodeFromString<JikanSearchResponse>(response.body.string())
