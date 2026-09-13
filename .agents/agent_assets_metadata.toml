@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "0arq-L-ePTHTlbU5-V3yJ"
+uri = "file://artifacts/gh-run-34760913191/AniZen-v0.5.228-v8a-r8-debug.apk"
+type = "unspecified"
+title = "AniZen v0.5.228 arm64-v8a R8 debug APK"
+description = "Built by GitHub Actions run 34760913191. SHA-256: 3fbdf90a07b6425fde33afc677a56202142b587728304edc828cbdd6e609fc38"
+logical_id = "2eed2ad4-6011-4caf-b7d6-af84094b5697"
+content_hash = "sha256:3fbdf90a07b6425fde33afc677a56202142b587728304edc828cbdd6e609fc38"
+size = 51710060
+mtime_ms = 1789307978000
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:418458c4-3e41-4e33-8359-29843b2b6f51/2eed2ad4-6011-4caf-b7d6-af84094b5697/6f0bd7e8-8422-40ce-ba5e-310b28fd233b"
+storage_version_token = "1789308043474946"
+content_type = "application/octet-stream"

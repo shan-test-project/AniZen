@@ -1,1 +1,2 @@
 - [AniList request quota](anilist-api-limits.md) — authenticated and public GraphQL requests share AniList's quota and must use one limiter.
+- [GitHub Actions APK builds](github-actions-apk-builds.md) — use the remote arm64 maximum-R8 workflow when local Android builds are intentionally avoided.
