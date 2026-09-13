@@ -57,7 +57,14 @@ class AiManager(
     }
 
     fun chatWithAssistantStream(query: String, history: List<ChatMessage>): Flow<String> = flow {
-        if (!aiPreferences.enableAi().get() || !aiPreferences.enableAiAssistant().get()) return@flow
+        if (!aiPreferences.enableAi().get()) {
+            emit("AI features are turned off. Enable 'AI Integration' in Settings > Advanced Analytics (AI Config) to use the assistant.")
+            return@flow
+        }
+        if (!aiPreferences.enableAiAssistant().get()) {
+            emit("The AI Assistant is turned off. Enable 'AI Assistant' in Settings > Advanced Analytics (AI Config) to chat here.")
+            return@flow
+        }
 
         // A request can leave these preferences set when Android kills the
         // process while the provider is streaming. Recover that state once for
