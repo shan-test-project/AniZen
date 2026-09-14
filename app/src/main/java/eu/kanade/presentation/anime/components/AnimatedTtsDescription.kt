@@ -1,34 +1,32 @@
 package eu.kanade.presentation.anime.components
 
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import eu.kanade.tachiyomi.util.tts.AnimeDescriptionTtsController
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
-import kotlin.math.sin
 
 @Composable
 fun rememberAnimeDescriptionTtsController(): AnimeDescriptionTtsController {
@@ -65,52 +63,57 @@ fun TtsPlayButton(
 @Composable
 fun AnimatedTtsText(
     text: String,
+    isSpeaking: Boolean,
     activeRange: IntRange?,
     effectsEnabled: Boolean,
     modifier: Modifier = Modifier,
     style: TextStyle,
 ) {
-    if (activeRange == null || !effectsEnabled) {
+    if (!effectsEnabled || !isSpeaking) {
         BasicText(text = text, modifier = modifier, style = style)
         return
     }
 
-    val safeStart = activeRange.first.coerceIn(0, text.length)
-    val safeEnd = (activeRange.last + 1).coerceIn(safeStart, text.length)
-    val density = LocalDensity.current.density
+    val safeStart = activeRange?.first?.coerceIn(0, text.length) ?: 0
+    val safeEnd = activeRange?.last
+        ?.plus(1)
+        ?.coerceIn(safeStart, text.length)
+        ?: safeStart
+    val baseColor = if (style.color == Color.Unspecified) {
+        LocalContentColor.current
+    } else {
+        style.color
+    }
     val transition = rememberInfiniteTransition(label = "tts-wave")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * Math.PI).toFloat(),
+    val activeAlpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
+            animation = tween(650),
+            repeatMode = RepeatMode.Reverse,
         ),
-        label = "tts-wave-phase",
+        label = "tts-active-alpha",
     )
-
-    Row(modifier = modifier) {
-        if (safeStart > 0) {
-            BasicText(text.substring(0, safeStart), style = style)
+    val dimColor = baseColor.copy(alpha = baseColor.alpha * 0.16f)
+    val activeColor = baseColor.copy(alpha = baseColor.alpha * activeAlpha)
+    val annotatedText = buildAnnotatedString {
+        withStyle(SpanStyle(color = dimColor)) {
+            append(text)
         }
-        text.substring(safeStart, safeEnd)
-            .forEachIndexed { index, char ->
-                val yOffset = sin(phase + index * 0.6f) * 3f
-                BasicText(
-                    text = AnnotatedString(
-                        char.toString(),
-                        SpanStyle(
-                            textDecoration = TextDecoration.Underline,
-                        ),
-                    ),
-                    style = style,
-                    modifier = Modifier.graphicsLayer {
-                        translationY = yOffset * density
-                    },
-                )
-            }
-        if (safeEnd < text.length) {
-            BasicText(text.substring(safeEnd), style = style)
+        if (safeEnd > safeStart) {
+            addStyle(
+                style = SpanStyle(
+                    color = activeColor,
+                    textDecoration = TextDecoration.Underline,
+                ),
+                start = safeStart,
+                end = safeEnd,
+            )
         }
     }
+    BasicText(
+        text = annotatedText,
+        modifier = modifier,
+        style = style,
+    )
 }

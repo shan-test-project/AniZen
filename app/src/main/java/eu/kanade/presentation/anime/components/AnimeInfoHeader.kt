@@ -423,6 +423,7 @@ fun ExpandableAnimeDescription(
                 description = desc,
                 expanded = expanded,
                 onExpand = { onExpanded(!expanded) },
+                isSpeaking = ttsController.isSpeaking,
                 activeRange = ttsController.activeRange,
                 effectsEnabled = ttsPreferences.enableVisualEffects().get(),
                 modifier = Modifier.weight(1f),
@@ -863,6 +864,7 @@ private fun AnimeSummary(
     description: String,
     expanded: Boolean,
     onExpand: () -> Unit,
+    isSpeaking: Boolean,
     activeRange: IntRange?,
     effectsEnabled: Boolean,
     modifier: Modifier = Modifier,
@@ -885,9 +887,10 @@ private fun AnimeSummary(
                     .fillMaxWidth()
                     .then(if (!expanded) Modifier.height(80.dp) else Modifier),
             ) {
-                if (activeRange != null && effectsEnabled) {
+                if (isSpeaking && effectsEnabled) {
                     AnimatedTtsText(
                         text = description,
+                        isSpeaking = isSpeaking,
                         activeRange = activeRange,
                         effectsEnabled = true,
                         modifier = Modifier
