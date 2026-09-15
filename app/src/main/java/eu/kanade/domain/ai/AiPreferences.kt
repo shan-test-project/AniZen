@@ -12,7 +12,7 @@ class AiPreferences(
 
     fun geminiApiKey() = preferenceStore.getString("gemini_api_key", "")
 
-    fun geminiModel() = preferenceStore.getString("gemini_model", "gemini-2.5-flash")
+    fun geminiModel() = preferenceStore.getString("gemini_model", "gemini-flash-latest")
 
     fun groqApiKey() = preferenceStore.getString("groq_api_key", "")
 
