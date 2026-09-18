@@ -343,15 +343,22 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
     }
 
     private fun setupSubtitlesOptions() {
+        val overrideAss = subtitlePreferences.overrideSubsASS().get()
+        val fitSubtitlesToVideo = subtitlePreferences.fitSubtitlesToVideo().get()
+
         MPVLib.setOptionString("slang", subtitlePreferences.preferredSubLanguages().get())
         MPVLib.setOptionString("sub-delay", (subtitlePreferences.subtitlesDelay().get() / 1000.0).toString())
         MPVLib.setOptionString("sub-speed", subtitlePreferences.subtitlesSpeed().get().toString())
         MPVLib.setOptionString("secondary-sub-delay", (subtitlePreferences.subtitlesSecondaryDelay().get() / 1000.0).toString())
         MPVLib.setOptionString("sub-font", subtitlePreferences.subtitleFont().get())
-        if (subtitlePreferences.overrideSubsASS().get()) {
-            MPVLib.setOptionString("sub-ass-override", "force")
-            MPVLib.setOptionString("sub-ass-justify", "yes")
-        }
+        // "force" still allows some ASS/SSA positioning and inline style tags to win.
+        // "strip" removes ASS tags and styles so all subtitles use the player settings.
+        MPVLib.setOptionString("sub-ass-override", if (overrideAss) "strip" else "scale")
+        MPVLib.setOptionString("sub-ass-justify", if (overrideAss) "yes" else "no")
+        // ASS subtitles are allowed to use black borders only when the user explicitly
+        // disables fitting them inside the video frame.
+        MPVLib.setOptionString("sub-ass-force-margins", if (fitSubtitlesToVideo) "no" else "yes")
+        MPVLib.setOptionString("sub-use-margins", if (fitSubtitlesToVideo) "no" else "yes")
         MPVLib.setOptionString("sub-font-size", subtitlePreferences.subtitleFontSize().get().toString())
         MPVLib.setOptionString("sub-bold", if (subtitlePreferences.boldSubtitles().get()) "yes" else "no")
         MPVLib.setOptionString("sub-italic", if (subtitlePreferences.italicSubtitles().get()) "yes" else "no")

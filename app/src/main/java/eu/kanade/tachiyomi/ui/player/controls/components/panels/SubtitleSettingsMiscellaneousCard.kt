@@ -71,14 +71,15 @@ fun SubtitlesMiscellaneousCard(modifier: Modifier = Modifier) {
     ) {
         Column {
             var overrideAssSubs by remember {
-                mutableStateOf(MPVLib.getPropertyString("sub-ass-override").also { println(it) } == "force")
+                mutableStateOf(MPVLib.getPropertyString("sub-ass-override") == "strip")
             }
             SwitchPreference(
                 overrideAssSubs,
                 onValueChange = {
                     overrideAssSubs = it
                     preferences.overrideSubsASS().set(it)
-                    MPVLib.setPropertyString("sub-ass-override", if (it) "force" else "scale")
+                    MPVLib.setPropertyString("sub-ass-override", if (it) "strip" else "scale")
+                    MPVLib.setPropertyString("sub-ass-justify", if (it) "yes" else "no")
                 },
                 content = { Text(stringResource(MR.strings.player_sheets_sub_override_ass)) },
                 modifier = Modifier
@@ -93,6 +94,7 @@ fun SubtitlesMiscellaneousCard(modifier: Modifier = Modifier) {
                 onValueChange = {
                     fitSubtitlesToVideo = it
                     preferences.fitSubtitlesToVideo().set(it)
+                    MPVLib.setPropertyBoolean("sub-ass-force-margins", !it)
                     MPVLib.setPropertyBoolean("sub-use-margins", !it)
                 },
                 content = { Text(stringResource(MR.strings.player_sheets_sub_fit_to_video)) },
@@ -158,8 +160,10 @@ fun SubtitlesMiscellaneousCard(modifier: Modifier = Modifier) {
                         }
                         preferences.overrideSubsASS().deleteAndGet().let { overrideAssSubs = it }
                         MPVLib.setPropertyString("sub-ass-override", "scale") // mpv's default is 'scale'
+                        MPVLib.setPropertyString("sub-ass-justify", "no")
                         preferences.fitSubtitlesToVideo().get().let {
                             fitSubtitlesToVideo = it
+                            MPVLib.setPropertyBoolean("sub-ass-force-margins", !it)
                             MPVLib.setPropertyBoolean("sub-use-margins", !it)
                         }
                     },

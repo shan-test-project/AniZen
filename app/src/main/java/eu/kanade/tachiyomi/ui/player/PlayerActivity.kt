@@ -90,7 +90,6 @@ import eu.kanade.tachiyomi.ui.player.settings.AdvancedPlayerPreferences
 import eu.kanade.tachiyomi.ui.player.settings.AudioPreferences
 import eu.kanade.tachiyomi.ui.player.settings.GesturePreferences
 import eu.kanade.tachiyomi.ui.player.settings.PlayerPreferences
-import eu.kanade.tachiyomi.ui.player.settings.SubtitlePreferences
 import eu.kanade.tachiyomi.ui.player.utils.ChapterUtils
 import eu.kanade.tachiyomi.ui.player.utils.ChapterUtils.Companion.getStringRes
 import eu.kanade.tachiyomi.util.system.powerManager
@@ -309,14 +308,6 @@ class PlayerActivity : BaseActivity() {
                 viewModel.hideControls()
                 return@addCallback
             }
-            finish()
-        }
-
-        Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
-            runOnUiThread {
-                toast(throwable.message)
-            }
-            logcat(LogPriority.ERROR, throwable)
             finish()
         }
 
@@ -540,11 +531,6 @@ class PlayerActivity : BaseActivity() {
             configDir = configDir,
             cacheDir = applicationContext.cacheDir.path,
             logLvl = logLevel,
-        )
-        MPVLib.setOptionString("sub-ass-force-margins", "yes")
-        MPVLib.setOptionString(
-            "sub-use-margins",
-            if (Injekt.get<SubtitlePreferences>().fitSubtitlesToVideo().get()) "no" else "yes",
         )
         MPVLib.setOptionString("idle", "yes")
         MPVLib.addLogObserver(playerObserver)

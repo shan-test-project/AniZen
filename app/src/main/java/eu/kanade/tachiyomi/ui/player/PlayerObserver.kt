@@ -10,28 +10,42 @@ class PlayerObserver(val activity: PlayerActivity) :
     MPVLib.EventObserver,
     MPVLib.LogObserver {
 
+    private fun postToPlayer(block: () -> Unit) {
+        if (activity.player.isExiting || !activity.player.initialized) return
+        activity.runOnUiThread {
+            if (activity.player.isExiting || !activity.player.initialized) return@runOnUiThread
+            try {
+                block()
+            } catch (e: Exception) {
+                // MPV can emit a final callback while a source is being replaced or
+                // the Activity is being destroyed. Never let that callback crash the app.
+                logcat(LogPriority.ERROR, e) { "Player callback failed" }
+            }
+        }
+    }
+
     override fun eventProperty(property: String) {
-        activity.runOnUiThread { activity.onObserverEvent(property) }
+        postToPlayer { activity.onObserverEvent(property) }
     }
 
     override fun eventProperty(property: String, value: Long) {
-        activity.runOnUiThread { activity.onObserverEvent(property, value) }
+        postToPlayer { activity.onObserverEvent(property, value) }
     }
 
     override fun eventProperty(property: String, value: Boolean) {
-        activity.runOnUiThread { activity.onObserverEvent(property, value) }
+        postToPlayer { activity.onObserverEvent(property, value) }
     }
 
     override fun eventProperty(property: String, value: String) {
-        activity.runOnUiThread { activity.onObserverEvent(property, value) }
+        postToPlayer { activity.onObserverEvent(property, value) }
     }
 
     override fun eventProperty(property: String, value: Double) {
-        activity.runOnUiThread { activity.onObserverEvent(property, value) }
+        postToPlayer { activity.onObserverEvent(property, value) }
     }
 
     override fun event(eventId: Int) {
-        activity.runOnUiThread { activity.event(eventId) }
+        postToPlayer { activity.event(eventId) }
     }
 
     override fun efEvent(err: String?) {
@@ -42,9 +56,7 @@ class PlayerObserver(val activity: PlayerActivity) :
             errorMessage += ": $httpError"
             httpError = null
         }
-        activity.runOnUiThread {
-            activity.onVideoError(errorMessage)
-        }
+        postToPlayer { activity.onVideoError(errorMessage) }
     }
 
     private var httpError: String? = null
@@ -62,9 +74,7 @@ class PlayerObserver(val activity: PlayerActivity) :
         if (level == MPVLib.mpvLogLevel.MPV_LOG_LEVEL_ERROR || level == MPVLib.mpvLogLevel.MPV_LOG_LEVEL_FATAL ||
             text.contains("Cannot open", ignoreCase = true) || text.contains("failed to open", ignoreCase = true)
         ) {
-            activity.runOnUiThread {
-                activity.viewModel.handleMpvLogFailure(text)
-            }
+            postToPlayer { activity.viewModel.handleMpvLogFailure(text) }
         }
     }
 }
