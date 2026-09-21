@@ -256,6 +256,10 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
     var onPlayerReady: (() -> Unit)? = null
 
     override fun postInitOptions() {
+        // Options configured during init can be replaced by mpv's runtime defaults.
+        // Re-apply the persisted subtitle values as properties after initialization,
+        // before the first file is loaded.
+        applySubtitleRuntimeOptions()
         onPlayerReady?.invoke()
         pendingVideoToPlay?.let { (vid, pos) ->
             pendingVideoToPlay = null
@@ -368,6 +372,22 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
         MPVLib.setOptionString("sub-shadow-offset", subtitlePreferences.shadowOffsetSubtitles().get().toString())
         MPVLib.setOptionString("sub-pos", subtitlePreferences.subtitlePos().get().toString())
         MPVLib.setOptionString("sub-scale", subtitlePreferences.subtitleFontScale().get().toString())
+    }
+
+    private fun applySubtitleRuntimeOptions() {
+        val overrideAss = subtitlePreferences.overrideSubsASS().get()
+        val fitSubtitlesToVideo = subtitlePreferences.fitSubtitlesToVideo().get()
+
+        MPVLib.setPropertyString("sub-ass-override", if (overrideAss) "strip" else "scale")
+        MPVLib.setPropertyString("sub-ass-justify", if (overrideAss) "yes" else "no")
+        MPVLib.setPropertyBoolean("sub-ass-force-margins", !fitSubtitlesToVideo)
+        MPVLib.setPropertyBoolean("sub-use-margins", !fitSubtitlesToVideo)
+    }
+
+    fun applySubtitlePreferences() {
+        if (initialized && !isExiting) {
+            applySubtitleRuntimeOptions()
+        }
     }
 
     fun checkAdaptiveScaling(delayedFrames: Long) {

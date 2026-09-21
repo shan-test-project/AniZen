@@ -1405,6 +1405,9 @@ class PlayerActivity : BaseActivity() {
             return
         }
 
+        // Re-apply saved subtitle properties before every file load. Some mpv
+        // runtime defaults can overwrite options set during initialization.
+        player.applySubtitlePreferences()
         setHttpOptions(video)
 
         // Set mime-type for TV or if provided
@@ -1570,6 +1573,9 @@ class PlayerActivity : BaseActivity() {
     // at void is.xyz.mpv.MPVLib.event(int) (MPVLib.java:86)
     private fun fileLoaded() {
         if (player.isExiting) return
+        // Apply after mpv has created the subtitle tracks as well as before
+        // loadfile; per-file subtitle defaults can otherwise win at this point.
+        player.applySubtitlePreferences()
         setMpvMediaTitle()
         setupPlayerOrientation()
         setupChapters()
