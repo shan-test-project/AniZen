@@ -146,12 +146,11 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
         }
 
         val (maxMb, maxBackMb, readahead) = when (tier) {
-            DeviceTierManager.Tier.LOW -> Triple(64, 32, 60)
-            DeviceTierManager.Tier.MID -> Triple(128, 64, 120)
-            DeviceTierManager.Tier.HIGH -> {
-                MPVLib.setOptionString("hwdec-extra-frames", "24")
-                Triple(192, 128, 180)
-            }
+            // Keep the player bounded on devices where native decoder memory is
+            // shared with the app. Streaming can refill these smaller buffers.
+            DeviceTierManager.Tier.LOW -> Triple(48, 24, 30)
+            DeviceTierManager.Tier.MID -> Triple(64, 32, 60)
+            DeviceTierManager.Tier.HIGH -> Triple(96, 48, 90)
         }
 
         currentMaxBytes = maxMb * 1024 * 1024L
@@ -189,7 +188,9 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
         
         MPVLib.setPropertyBoolean("pause", true)
         MPVLib.setOptionString("profile", "fast")
-        MPVLib.setOptionString("hwdec", if (decoderPreferences.tryHWDecoding().get()) "mediacodec,mediacodec-copy" else "no")
+        // Prefer the copy path: it avoids handing the decoder a surface that can
+        // disappear during Activity/GPU teardown, while retaining a hardware path.
+        MPVLib.setOptionString("hwdec", if (decoderPreferences.tryHWDecoding().get()) "mediacodec-copy,mediacodec" else "no")
         
         // Gated Defaults with HQ toggle
         val isHighQuality = decoderPreferences.highQualityScaling().get()
@@ -223,10 +224,6 @@ class AniyomiMPVView(context: Context, attributes: AttributeSet) : BaseMPVView(c
         MPVLib.setOptionString("cookies", "yes")
         MPVLib.setOptionString("cache", "yes")
         MPVLib.setOptionString("demuxer-thread", "yes")
-
-        val cacheMegs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) 64 else 32
-        MPVLib.setOptionString("demuxer-max-bytes", "${cacheMegs * 1024 * 1024}")
-        MPVLib.setOptionString("demuxer-max-back-bytes", "${cacheMegs * 1024 * 1024}")
 
         applyPlaybackStrategy()
         

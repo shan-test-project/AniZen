@@ -71,7 +71,7 @@ fun SubtitlesMiscellaneousCard(modifier: Modifier = Modifier) {
     ) {
         Column {
             var overrideAssSubs by remember {
-                mutableStateOf(MPVLib.getPropertyString("sub-ass-override") == "strip")
+                mutableStateOf(preferences.overrideSubsASS().get())
             }
             SwitchPreference(
                 overrideAssSubs,
