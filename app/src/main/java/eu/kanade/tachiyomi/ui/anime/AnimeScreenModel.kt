@@ -66,6 +66,7 @@ import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -287,6 +288,7 @@ class AnimeScreenModel(
                 val localAnime = networkToLocalAnime.await(bestMatch.toDomainAnime(state.anime.source))
                 _openRelatedAnimeFlow.tryEmit(localAnime.id)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 logcat(LogPriority.ERROR, e) { "Could not resolve related anime '$title' in current source" }
             }
         }
@@ -777,6 +779,7 @@ class AnimeScreenModel(
                 updateAnime.awaitUpdateFromSource(state.anime, networkAnime, manualFetch)
             }
         } catch (e: Throwable) {
+            if (e is CancellationException) throw e
             if (e is HttpException && e.code == 103) return
             logcat(LogPriority.ERROR, e)
             screenModelScope.launch {
@@ -954,7 +957,9 @@ class AnimeScreenModel(
                                         updateSection(SuggestionSection.Type.Franchise, validSeasons)
                                     }
                                 }
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
+                            }
                         }
 
                         // 1. Similar Media (Broad Search Probe)
@@ -967,7 +972,9 @@ class AnimeScreenModel(
                                     .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
                                     .awaitAll()
                                 if (domainAnimes.isNotEmpty()) updateSection(SuggestionSection.Type.Similarity, domainAnimes)
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
+                            }
                         }
 
                         // 3. Official Related (Source Provided)
@@ -984,7 +991,9 @@ class AnimeScreenModel(
                                         }
                                     }
                                 }
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
+                            }
                         }
 
                         // 4. Smart Recommendations (Parallel Tag Search)
@@ -1034,7 +1043,8 @@ class AnimeScreenModel(
                                                     .take(8)
                                                     .map { async { networkToLocalAnime.await(it.toDomainAnime(anime.source)) } }
                                                     .awaitAll()
-                                            } catch (_: Exception) {
+                                            } catch (e: Exception) {
+                                                if (e is CancellationException) throw e
                                                 emptyList()
                                             }
                                         }
@@ -1047,7 +1057,8 @@ class AnimeScreenModel(
                     }
                 } ?: updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
             } catch (e: Exception) {
-                // Log error if needed
+                if (e is CancellationException) throw e
+                logcat(LogPriority.WARN, e) { "Unable to load anime suggestions" }
             } finally {
                 updateSuccessState { it.copySuccess(isSuggestionsLoading = false) }
             }
@@ -1186,6 +1197,7 @@ class AnimeScreenModel(
                 val episodes = source.getEpisodeList(anime.toSAnime())
                 syncEpisodesWithSource.await(episodes, anime, source, false, fetchWindow)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 logcat(LogPriority.ERROR, e)
             }
         }
@@ -1245,7 +1257,8 @@ class AnimeScreenModel(
                     updateSuccessState { it.copySuccess(fillerEpisodes = fillerList) }
                 }
             } catch (e: Exception) {
-                logcat(LogPriority.ERROR, e)
+                if (e is CancellationException) throw e
+                logcat(LogPriority.WARN, e) { "Unable to load filler episode metadata" }
             }
         }
     }
@@ -1312,6 +1325,7 @@ class AnimeScreenModel(
                 )
             }
         } catch (e: Throwable) {
+            if (e is CancellationException) throw e
             val message = if (e is NoSeasonsException) {
                 context.stringResource(MR.strings.no_episodes_error)
             } else {
@@ -1342,6 +1356,7 @@ class AnimeScreenModel(
                 if (manualFetch) downloadNewEpisodes(newEpisodes)
             }
         } catch (e: Throwable) {
+            if (e is CancellationException) throw e
             val message = if (e is NoResultsException) context.stringResource(MR.strings.no_episodes_error) else {
                 logcat(LogPriority.ERROR, e)
                 with(context) { e.formattedMessage }
@@ -1383,6 +1398,7 @@ class AnimeScreenModel(
                 syncEpisodesWithSource.await(fetched, season.anime, source, false)
                 episodes = getAnimeAndEpisodesAndSeasons.awaitEpisodes(season.anime.id)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 logcat(LogPriority.ERROR, e)
             }
         }
@@ -2019,6 +2035,7 @@ class AnimeScreenModel(
                     updateSuccessState { it.copySuccess(relations = relations.toImmutableList()) }
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 logcat(LogPriority.ERROR, e)
                 if (relationRequestKey == key) {
                     relationRequestKey = null
@@ -2083,6 +2100,7 @@ class AnimeScreenModel(
             updateAnime.await(AnimeUpdate(id = anime.id, cast = cast))
             updateSuccessState { it.copySuccess(anime = it.anime.copy(cast = cast)) }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             logcat(LogPriority.WARN, e) {
                 "Could not fetch AniList cast for anime ${anime.id}"
             }

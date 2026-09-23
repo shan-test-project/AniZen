@@ -29,7 +29,10 @@ fun Uri.toShareIntent(context: Context, type: String = "image/*", message: Strin
     }
 
     return Intent.createChooser(shareIntent, context.stringResource(MR.strings.action_share)).apply {
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        // Android 11 may resolve the chooser in a different process. The grant
+        // must be present on the chooser as well as the wrapped SEND intent.
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        clipData = shareIntent.clipData
     }
 }
 

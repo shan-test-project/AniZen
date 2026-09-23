@@ -396,7 +396,8 @@ class PlayerViewModel @JvmOverloads constructor(
                     }
                 }
             } catch (e: Exception) {
-                // Ignore
+                if (e is CancellationException) throw e
+                logcat(LogPriority.WARN, e) { "Unable to load filler episode metadata" }
             }
         }
     }

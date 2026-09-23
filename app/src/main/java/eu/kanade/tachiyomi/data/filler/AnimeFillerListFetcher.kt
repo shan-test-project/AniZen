@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.filler
 
 import eu.kanade.tachiyomi.network.NetworkHelper
+import kotlinx.coroutines.CancellationException
 import okhttp3.Request
 import org.jsoup.Jsoup
 import tachiyomi.core.common.util.lang.withIOContext
@@ -55,7 +56,10 @@ class AnimeFillerListFetcher(
             }
 
             if (showUrl.isNullOrBlank()) {
-                throw Exception("Unable to extract metadata of series and episode")
+                // A title not being present in the optional filler database is a
+                // valid result, not an application failure.
+                cache[titleClean] = emptySet()
+                return@withIOContext emptySet()
             }
 
             // 3. Fetch episodes from the show page
@@ -67,7 +71,7 @@ class AnimeFillerListFetcher(
             val fillerEpisodes = mutableSetOf<Float>()
             networkHelper.client.newCall(showRequest).execute().use { response ->
                 if (!response.isSuccessful) {
-                    throw Exception("Unable to extract metadata of series and episode")
+                    return@withIOContext emptySet()
                 }
                 val body = response.body.string()
                 val doc = Jsoup.parse(body)
@@ -85,9 +89,8 @@ class AnimeFillerListFetcher(
 
             cache[titleClean] = fillerEpisodes
             return@withIOContext fillerEpisodes
-        } catch (e: Exception) {
-            cache[titleClean] = emptySet() // Cache empty so we don't spam network
-            throw Exception("Unable to extract metadata of series and episode", e)
+        } catch (e: CancellationException) {
+            throw e
         }
     }
 

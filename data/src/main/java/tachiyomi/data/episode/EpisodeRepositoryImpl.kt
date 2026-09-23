@@ -1,9 +1,7 @@
 package tachiyomi.data.episode
 
 import kotlinx.coroutines.flow.Flow
-import logcat.LogPriority
 import tachiyomi.core.common.util.lang.toLong
-import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.DatabaseHandler
 import tachiyomi.domain.episode.model.Episode
 import tachiyomi.domain.episode.model.EpisodeUpdate
@@ -14,36 +12,46 @@ class EpisodeRepositoryImpl(
 ) : EpisodeRepository {
 
     override suspend fun addAll(episodes: List<Episode>): List<Episode> {
-        return try {
-            handler.await(inTransaction = true) {
-                episodes.map { episode ->
-                    episodesQueries.insert(
-                        episode.animeId,
-                        episode.url,
-                        episode.name,
-                        episode.scanlator,
-                        episode.seen,
-                        episode.bookmark,
-                        // AM (FILLERMARK) -->
-                        episode.fillermark,
-                        // <-- AM (FILLERMARK)
-                        episode.lastSecondSeen,
-                        episode.totalSeconds,
-                        episode.episodeNumber,
-                        episode.sourceOrder,
-                        episode.dateFetch,
-                        episode.dateUpload,
-                        episode.summary,
-                        episode.previewUrl,
-                        episode.version,
+        return handler.await(inTransaction = true) {
+            episodes.map { episode ->
+                // A library refresh and a manual refresh can observe the same missing
+                // episode before either transaction writes it. The database constraint is
+                // still the source of truth, so make this boundary idempotent instead of
+                // turning a normal refresh race into a failed transaction.
+                episodesQueries.insertOrIgnore(
+                    episode.animeId,
+                    episode.url,
+                    episode.name,
+                    episode.scanlator,
+                    episode.seen,
+                    episode.bookmark,
+                    // AM (FILLERMARK) -->
+                    episode.fillermark,
+                    // <-- AM (FILLERMARK)
+                    episode.lastSecondSeen,
+                    episode.totalSeconds,
+                    episode.episodeNumber,
+                    episode.sourceOrder,
+                    episode.dateFetch,
+                    episode.dateUpload,
+                    episode.summary,
+                    episode.previewUrl,
+                    episode.version,
+                )
+
+                // INSERT OR IGNORE may have found a row created by another refresh.
+                // Return the persisted row in either case; an unexpected missing row is
+                // a real database error and must not be silently converted to an empty list.
+                episodesQueries.getEpisodeByUrlAndAnimeId(
+                    episode.url,
+                    episode.animeId,
+                    EpisodeMapper::mapEpisode,
+                ).executeAsOneOrNull()
+                    ?: error(
+                        "Episode insert was ignored but no row exists for " +
+                            "animeId=${episode.animeId}, url=${episode.url}",
                     )
-                    val lastInsertId = episodesQueries.selectLastInsertedRowId().executeAsOne()
-                    episode.copy(id = lastInsertId)
-                }
             }
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e)
-            emptyList()
         }
     }
 

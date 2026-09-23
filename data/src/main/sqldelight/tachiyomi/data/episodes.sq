@@ -139,6 +139,10 @@ insert:
 INSERT INTO episodes(anime_id, url, name, scanlator, seen, bookmark, fillermark, last_second_seen, total_seconds, episode_number, source_order, date_fetch, date_upload, summary, preview_url, last_modified_at, version, is_syncing)
 VALUES (:animeId, :url, :name, :scanlator, :seen, :bookmark, :fillermark, :lastSecondSeen, :totalSeconds, :episodeNumber, :sourceOrder, :dateFetch, :dateUpload, :summary, :previewUrl, 0, :version, 0);
 
+insertOrIgnore:
+INSERT OR IGNORE INTO episodes(anime_id, url, name, scanlator, seen, bookmark, fillermark, last_second_seen, total_seconds, episode_number, source_order, date_fetch, date_upload, summary, preview_url, last_modified_at, version, is_syncing)
+VALUES (:animeId, :url, :name, :scanlator, :seen, :bookmark, :fillermark, :lastSecondSeen, :totalSeconds, :episodeNumber, :sourceOrder, :dateFetch, :dateUpload, :summary, :previewUrl, 0, :version, 0);
+
 update:
 UPDATE episodes
 SET anime_id = coalesce(:animeId, anime_id),
