@@ -1,7 +1,9 @@
 package tachiyomi.data.episode
 
 import kotlinx.coroutines.flow.Flow
+import logcat.LogPriority
 import tachiyomi.core.common.util.lang.toLong
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.DatabaseHandler
 import tachiyomi.domain.episode.model.Episode
 import tachiyomi.domain.episode.model.EpisodeUpdate
