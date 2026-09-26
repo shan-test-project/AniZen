@@ -121,7 +121,7 @@ data object BrowseTab : Tab {
                 }
                 add(
                     eu.kanade.presentation.components.TabContent(
-                        titleRes = SYMR.strings.announcements,
+                        titleRes = MR.strings.announcements,
                         searchEnabled = false,
                         content = { contentPadding, _ ->
                             AnnouncementsTab.Content(contentPadding)
