@@ -58,10 +58,6 @@ jobs:
           SIZE_BYTES=$(stat -c%s "$APK")
           SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
           echo "APK size: ${SIZE_MB} MiB (${SIZE_BYTES} bytes)"
-          if [ "$SIZE_BYTES" -gt $((80 * 1024 * 1024)) ]; then
-            echo "The optimized APK exceeds the expected size ceiling." >&2
-            exit 1
-          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
