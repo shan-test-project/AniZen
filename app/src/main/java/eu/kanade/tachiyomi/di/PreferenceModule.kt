@@ -23,6 +23,7 @@ import eu.kanade.tachiyomi.util.LocalHttpServerHolder
 import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import mihon.feature.airingschedule.SchedulePreferences
 import mihon.feature.airingschedule.UploadDelayTracker
+import mihon.feature.announcements.AnnouncementsPreferences
 import tachiyomi.core.common.preference.AndroidPreferenceStore
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.storage.AndroidStorageFolderProvider
@@ -115,6 +116,7 @@ class PreferenceModule(val app: Application) : InjektModule {
 
         addSingletonFactory { SchedulePreferences(get()) }
         addSingletonFactory { UploadDelayTracker() }
+        addSingletonFactory { AnnouncementsPreferences(get()) }
 
         addSingletonFactory {
             SyncPreferences(get())

@@ -1669,6 +1669,7 @@
     <string name="pref_show_bottom_bar_labels">Always show nav labels</string>
 
     <string name="feed">Feed</string>
+    <string name="announcements">Announcements</string>
     <string name="pref_show_episode_summary">Show episode summary</string>
     <string name="pref_show_episode_thumbnail">Show episode thumbnail</string>
     <string name="pref_hide_missing_episodes">Hide missing episode indicators</string>

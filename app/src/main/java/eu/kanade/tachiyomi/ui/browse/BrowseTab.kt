@@ -30,6 +30,7 @@ import eu.kanade.tachiyomi.ui.browse.source.sourcesTab
 import eu.kanade.tachiyomi.ui.home.FeedManageScreen
 import eu.kanade.tachiyomi.ui.home.FeedTab
 import eu.kanade.tachiyomi.ui.main.MainActivity
+import mihon.feature.announcements.AnnouncementsTab
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.flow.collectLatest
@@ -118,6 +119,15 @@ data object BrowseTab : Tab {
                         )
                     )
                 }
+                add(
+                    eu.kanade.presentation.components.TabContent(
+                        titleRes = SYMR.strings.announcements,
+                        searchEnabled = false,
+                        content = { contentPadding, _ ->
+                            AnnouncementsTab.Content(contentPadding)
+                        },
+                    ),
+                )
                 add(extensionsTab)
                 add(migrateSourceTab)
             }.toPersistentList()
@@ -136,7 +146,7 @@ data object BrowseTab : Tab {
         LaunchedEffect(state, showFeedInBrowse) {
             switchToExtensionTabChannel.receiveAsFlow()
                 .collectLatest { 
-                    val targetPage = if (showFeedInBrowse) 2 else 1
+                    val targetPage = if (showFeedInBrowse) 3 else 2
                     state.scrollToPage(targetPage) 
                 }
         }

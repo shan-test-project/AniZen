@@ -162,9 +162,8 @@ android {
 
     packaging {
         jniLibs {
-            // Compress native libraries so the arm64-v8a debug APK stays within the
-            // distribution size ceiling while remaining installable on supported Android versions.
-            useLegacyPackaging = true
+            // Keep native libraries uncompressed for the requested APK packaging.
+            useLegacyPackaging = false
         }
         resources {
             excludes += setOf(
