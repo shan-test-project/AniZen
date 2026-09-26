@@ -31,6 +31,7 @@ import eu.kanade.tachiyomi.ui.home.FeedManageScreen
 import eu.kanade.tachiyomi.ui.home.FeedTab
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import mihon.feature.announcements.AnnouncementsTab
+import mihon.feature.announcements.AnnouncementsScreenModel
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.flow.collectLatest
@@ -75,6 +76,7 @@ data object BrowseTab : Tab {
         // Hoisted for extensions tab's search bar
         val extensionsScreenModel = rememberScreenModel { ExtensionsScreenModel() }
         val animeExtensionsState by extensionsScreenModel.state.collectAsStateFlow()
+        val announcementsScreenModel = rememberScreenModel { AnnouncementsScreenModel() }
 
         val sourcesTab = sourcesTab()
         val extensionsTab = extensionsTab(extensionsScreenModel)
@@ -84,7 +86,15 @@ data object BrowseTab : Tab {
         val feedMode by uiPreferences.feedPanoramaMode().collectAsStatePref() as State<PanoramaMode>
         val effectivePanorama = remember(globalPanorama, feedMode) { feedMode.resolve(globalPanorama) }
 
-        val tabs = remember(showFeedInBrowse, sourcesTab, extensionsTab, migrateSourceTab, feedMode, effectivePanorama) {
+        val tabs = remember(
+            showFeedInBrowse,
+            sourcesTab,
+            extensionsTab,
+            migrateSourceTab,
+            feedMode,
+            effectivePanorama,
+            announcementsScreenModel,
+        ) {
             buildList {
                 add(sourcesTab)
                 if (showFeedInBrowse) {
@@ -124,7 +134,7 @@ data object BrowseTab : Tab {
                         titleRes = MR.strings.announcements,
                         searchEnabled = false,
                         content = { contentPadding, _ ->
-                            AnnouncementsTab.Content(contentPadding)
+                            AnnouncementsTab.Content(contentPadding, announcementsScreenModel)
                         },
                     ),
                 )

@@ -24,15 +24,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 
 object AnnouncementsTab {
 
     @Composable
-    fun Content(contentPadding: PaddingValues) {
-        val screenModel = rememberScreenModel { AnnouncementsScreenModel() }
+    fun Content(
+        contentPadding: PaddingValues,
+        screenModel: AnnouncementsScreenModel,
+    ) {
         val state by screenModel.state.collectAsState()
         val navigator = LocalNavigator.currentOrThrow
 
