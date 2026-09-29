@@ -1,5 +1,8 @@
 package mihon.feature.announcements
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import cafe.adriel.voyager.core.model.StateScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import kotlinx.collections.immutable.ImmutableList
@@ -11,7 +14,29 @@ import uy.kohesive.injekt.api.get
 class AnnouncementsScreenModel(
     private val repository: AnnouncementsRepository = AnnouncementsRepository(),
     private val preferences: AnnouncementsPreferences = Injekt.get(),
-) : StateScreenModel<AnnouncementsScreenModel.State>(State.Loading) {
+) : StateScreenModel<AnnouncementsScreenModel.State>(
+    repository.getCached()?.let { cached ->
+        State.Success(
+            allEntries = cached.toImmutableList(),
+            selectedCategory = preferences.categoryFilter().get().takeIf { it.isNotEmpty() }?.let { runCatching { AnnouncementCategory.valueOf(it) }.getOrNull() },
+            selectedYear = preferences.yearFilter().get().toIntOrNull(),
+            sort = preferences.sort().get(),
+            includeAdult = preferences.includeAdult().get(),
+            autoRefresh = preferences.autoRefresh().get(),
+            fromCache = true,
+        )
+    } ?: State.Loading,
+) {
+    var showFiltersDialog by mutableStateOf(false)
+        private set
+
+    fun openFilters() {
+        showFiltersDialog = true
+    }
+
+    fun closeFilters() {
+        showFiltersDialog = false
+    }
 
     sealed interface State {
         data object Loading : State
@@ -71,13 +96,16 @@ class AnnouncementsScreenModel(
 
     fun load(forceRefresh: Boolean = false) {
         screenModelScope.launch {
-            val previous = state as? State.Success
-            mutableState.value = State.Loading
+            val previous = mutableState.value as? State.Success
+            if (previous == null || forceRefresh) {
+                mutableState.value = State.Loading
+            }
             when (val result = repository.getAnnouncements(forceRefresh)) {
                 is AnnouncementsRepository.Result.Success -> {
                     mutableState.value = State.Success(
                         allEntries = result.entries.toImmutableList(),
-                        selectedCategory = previous?.selectedCategory,
+                        selectedCategory = previous?.selectedCategory
+                            ?: preferences.categoryFilter().get().takeIf { it.isNotEmpty() }?.let { runCatching { AnnouncementCategory.valueOf(it) }.getOrNull() },
                         selectedYear = previous?.selectedYear ?: preferences.yearFilter().get().toIntOrNull(),
                         sort = previous?.sort ?: preferences.sort().get(),
                         includeAdult = previous?.includeAdult ?: preferences.includeAdult().get(),
@@ -86,17 +114,21 @@ class AnnouncementsScreenModel(
                     )
                 }
                 is AnnouncementsRepository.Result.Failure -> {
-                    mutableState.value = State.Error(result.cachedEntries.toImmutableList())
+                    if (previous != null) {
+                        mutableState.value = previous
+                    } else {
+                        mutableState.value = State.Error(result.cachedEntries.toImmutableList())
+                    }
                 }
             }
         }
     }
 
     fun showCachedData() {
-        val cached = (state as? State.Error)?.cachedEntries ?: return
+        val cached = (mutableState.value as? State.Error)?.cachedEntries ?: return
         mutableState.value = State.Success(
             allEntries = cached,
-            selectedCategory = null,
+            selectedCategory = preferences.categoryFilter().get().takeIf { it.isNotEmpty() }?.let { runCatching { AnnouncementCategory.valueOf(it) }.getOrNull() },
             selectedYear = preferences.yearFilter().get().toIntOrNull(),
             sort = preferences.sort().get(),
             includeAdult = preferences.includeAdult().get(),
@@ -106,31 +138,48 @@ class AnnouncementsScreenModel(
     }
 
     fun selectCategory(category: AnnouncementCategory?) {
-        val current = state as? State.Success ?: return
+        val current = mutableState.value as? State.Success ?: return
+        preferences.categoryFilter().set(category?.name.orEmpty())
         mutableState.value = current.copy(selectedCategory = category)
     }
 
     fun selectYear(year: Int?) {
-        val current = state as? State.Success ?: return
+        val current = mutableState.value as? State.Success ?: return
         preferences.yearFilter().set(year?.toString().orEmpty())
         mutableState.value = current.copy(selectedYear = year)
     }
 
     fun setSort(sort: AnnouncementSort) {
-        val current = state as? State.Success ?: return
+        val current = mutableState.value as? State.Success ?: return
         preferences.sort().set(sort)
         mutableState.value = current.copy(sort = sort)
     }
 
     fun setIncludeAdult(include: Boolean) {
-        val current = state as? State.Success ?: return
+        val current = mutableState.value as? State.Success ?: return
         preferences.includeAdult().set(include)
         mutableState.value = current.copy(includeAdult = include)
     }
 
     fun setAutoRefresh(autoRefresh: AnnouncementAutoRefresh) {
-        val current = state as? State.Success ?: return
+        val current = mutableState.value as? State.Success ?: return
         preferences.autoRefresh().set(autoRefresh)
         mutableState.value = current.copy(autoRefresh = autoRefresh)
+    }
+
+    fun resetFilters() {
+        val current = mutableState.value as? State.Success ?: return
+        preferences.categoryFilter().set("")
+        preferences.yearFilter().set("")
+        preferences.sort().set(AnnouncementSort.AIRING_SOON)
+        preferences.includeAdult().set(false)
+        preferences.autoRefresh().set(AnnouncementAutoRefresh.OFF)
+        mutableState.value = current.copy(
+            selectedCategory = null,
+            selectedYear = null,
+            sort = AnnouncementSort.AIRING_SOON,
+            includeAdult = false,
+            autoRefresh = AnnouncementAutoRefresh.OFF,
+        )
     }
 }

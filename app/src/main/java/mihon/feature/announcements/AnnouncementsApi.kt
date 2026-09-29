@@ -1,6 +1,9 @@
 package mihon.feature.announcements
 
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -20,31 +23,37 @@ class AnnouncementsApi(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     suspend fun fetchAnnouncements(maxPages: Int = MAX_PAGES): List<AnnouncementEntry> = withIOContext {
+        val pageLimit = maxPages.coerceIn(1, MAX_PAGES)
+        val pageResults = coroutineScope {
+            (1..pageLimit).map { page ->
+                async {
+                    fetchPage(page, QUERY_POPULARITY)
+                }
+            }.awaitAll()
+        }
+
         val seenIds = mutableSetOf<Int>()
         val results = mutableListOf<AnnouncementEntry>()
-        val pageLimit = maxPages.coerceIn(1, MAX_PAGES)
 
-        for (page in 1..pageLimit) {
-            val pageResult = fetchPage(page)
-            val mediaList = pageResult.media
-            if (mediaList.isEmpty()) break
-
-            mediaList.forEach { dto ->
+        for (pageResult in pageResults) {
+            for (dto in pageResult.media) {
                 if (seenIds.add(dto.id)) {
                     dto.toAnnouncementEntry()?.let { results.add(it) }
                 }
             }
-
-            if (results.size >= MAX_ENTRIES) break
-            if (!pageResult.hasNextPage) break
         }
 
         results
     }
 
-    private suspend fun fetchPage(page: Int): PageResult {
+    suspend fun fetchNewestAnnouncements(): List<AnnouncementEntry> = withIOContext {
+        val pageResult = fetchPage(1, QUERY_NEWEST_IDS)
+        pageResult.media.mapNotNull { it.toAnnouncementEntry() }
+    }
+
+    private suspend fun fetchPage(page: Int, query: String = QUERY_POPULARITY): PageResult {
         val requestBody = GraphQlRequest(
-            query = QUERY,
+            query = query,
             variables = mapOf("page" to page, "perPage" to PER_PAGE),
         )
         val request = Request.Builder()
@@ -69,15 +78,19 @@ class AnnouncementsApi(
 
     private fun MediaDto.toAnnouncementEntry(): AnnouncementEntry? {
         val titleText = title.english ?: title.userPreferred ?: title.romaji ?: return null
-        val prequelEdge = relations?.edges?.firstOrNull { edge ->
-            edge.relationType == "PREQUEL" && edge.node.type == "ANIME"
-        }
-        val otherRelationType = relations?.edges?.firstOrNull { edge ->
-            edge.node.type == "ANIME" && edge.relationType in setOf("SPIN_OFF", "REMAKE")
-        }?.relationType
-        val relatedEdge = prequelEdge ?: relations?.edges?.firstOrNull { edge ->
-            edge.node.type == "ANIME" &&
-                edge.relationType in setOf("PARENT", "SPIN_OFF", "REMAKE", "SEQUEL")
+        val animeEdges = relations?.edges?.filter { it.node.type == "ANIME" } ?: emptyList()
+
+        val prequelEdge = animeEdges.firstOrNull { it.relationType == "PREQUEL" }
+        val parentEdge = animeEdges.firstOrNull { it.relationType == "PARENT" }
+        val sideStoryEdge = animeEdges.firstOrNull { it.relationType in setOf("SIDE_STORY", "SPIN_OFF") }
+        val alternativeEdge = animeEdges.firstOrNull { it.relationType in setOf("ALTERNATIVE", "REMAKE") }
+
+        val hasPrequelOrParent = prequelEdge != null || parentEdge != null
+        val hasSpinOffOrSideStory = sideStoryEdge != null
+        val hasAlternative = alternativeEdge != null
+
+        val relatedEdge = prequelEdge ?: parentEdge ?: sideStoryEdge ?: alternativeEdge ?: animeEdges.firstOrNull {
+            it.relationType in setOf("SEQUEL", "CHARACTER", "SUMMARY")
         }
         val relatedTitle = relatedEdge?.node?.title?.english
             ?: relatedEdge?.node?.title?.userPreferred
@@ -85,8 +98,10 @@ class AnnouncementsApi(
         val category = AnnouncementTextBuilder.categoryFor(
             format = format,
             source = source,
-            relationType = otherRelationType,
-            hasPrequelEdge = prequelEdge != null,
+            hasPrequelOrParent = hasPrequelOrParent,
+            hasSpinOffOrSideStory = hasSpinOffOrSideStory,
+            hasAlternative = hasAlternative,
+            title = titleText,
         )
 
         val relatedYear = relatedEdge?.node?.startDate?.year
@@ -128,15 +143,46 @@ class AnnouncementsApi(
     }
 
     companion object {
-        private const val PER_PAGE = 25
-        private const val MAX_PAGES = 50
+        private const val PER_PAGE = 50
+        private const val MAX_PAGES = 5
         private const val MAX_ENTRIES = MAX_PAGES * PER_PAGE
 
-        private const val QUERY = """
+        private const val QUERY_POPULARITY = """
             query Announcements(${'$'}page: Int, ${'$'}perPage: Int) {
                 Page(page: ${'$'}page, perPage: ${'$'}perPage) {
                     pageInfo { hasNextPage }
                     media(status: NOT_YET_RELEASED, sort: [POPULARITY_DESC], type: ANIME) {
+                        id
+                        title { english userPreferred romaji }
+                        format
+                        source
+                        averageScore
+                        popularity
+                        isAdult
+                        startDate { year month day }
+                        coverImage { extraLarge medium color }
+                        bannerImage
+                        relations {
+                            edges {
+                                relationType(version: 2)
+                                node {
+                                    id
+                                    title { english userPreferred romaji }
+                                    startDate { year }
+                                    type
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        """
+
+        private const val QUERY_NEWEST_IDS = """
+            query Announcements(${'$'}page: Int, ${'$'}perPage: Int) {
+                Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                    pageInfo { hasNextPage }
+                    media(status: NOT_YET_RELEASED, sort: [ID_DESC], type: ANIME) {
                         id
                         title { english userPreferred romaji }
                         format

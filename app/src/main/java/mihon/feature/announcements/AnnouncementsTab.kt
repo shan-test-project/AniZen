@@ -3,43 +3,40 @@ package mihon.feature.announcements
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import eu.kanade.presentation.components.AdaptiveSheet
+import tachiyomi.i18n.MR
+import tachiyomi.presentation.core.i18n.stringResource
 
 object AnnouncementsTab {
 
@@ -61,15 +58,22 @@ object AnnouncementsTab {
             is AnnouncementsScreenModel.State.Success -> SuccessState(
                 contentPadding = contentPadding,
                 state = current,
-                onSelectCategory = screenModel::selectCategory,
-                onSelectYear = screenModel::selectYear,
-                onSelectSort = screenModel::setSort,
-                onSetIncludeAdult = screenModel::setIncludeAdult,
-                onSetAutoRefresh = screenModel::setAutoRefresh,
-                onRefresh = { screenModel.load(forceRefresh = true) },
                 onCardClick = { entry ->
                     navigator.push(AnnouncementDetailScreen(entry))
                 },
+            )
+        }
+
+        if (screenModel.showFiltersDialog && state is AnnouncementsScreenModel.State.Success) {
+            AnnouncementsFilterSheet(
+                state = state as AnnouncementsScreenModel.State.Success,
+                onDismissRequest = screenModel::closeFilters,
+                onSelectCategory = screenModel::selectCategory,
+                onSelectSort = screenModel::setSort,
+                onSelectYear = screenModel::selectYear,
+                onSetIncludeAdult = screenModel::setIncludeAdult,
+                onSetAutoRefresh = screenModel::setAutoRefresh,
+                onReset = screenModel::resetFilters,
             )
         }
     }
@@ -122,217 +126,183 @@ object AnnouncementsTab {
     private fun SuccessState(
         contentPadding: PaddingValues,
         state: AnnouncementsScreenModel.State.Success,
-        onSelectCategory: (AnnouncementCategory?) -> Unit,
-        onSelectYear: (Int?) -> Unit,
-        onSelectSort: (AnnouncementSort) -> Unit,
-        onSetIncludeAdult: (Boolean) -> Unit,
-        onSetAutoRefresh: (AnnouncementAutoRefresh) -> Unit,
-        onRefresh: () -> Unit,
         onCardClick: (AnnouncementEntry) -> Unit,
     ) {
-        var showFilters by remember { mutableStateOf(false) }
-        var showSortMenu by remember { mutableStateOf(false) }
-
-        Column(modifier = Modifier.fillMaxSize()) {
-            CategoryChipsRow(selected = state.selectedCategory, onSelect = onSelectCategory)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box {
-                    FilterChip(
-                        selected = false,
-                        onClick = { showSortMenu = true },
-                        label = { Text("Sort: ${state.sort.displayName()}") },
-                    )
-                    DropdownMenu(
-                        expanded = showSortMenu,
-                        onDismissRequest = { showSortMenu = false },
-                    ) {
-                        AnnouncementSort.entries.forEach { sort ->
-                            DropdownMenuItem(
-                                text = { Text(sort.displayName()) },
-                                leadingIcon = {
-                                    RadioButton(
-                                        selected = state.sort == sort,
-                                        onClick = null,
-                                    )
-                                },
-                                onClick = {
-                                    onSelectSort(sort)
-                                    showSortMenu = false
-                                },
-                            )
-                        }
-                    }
-                }
-                FilterChip(
-                    selected = state.selectedYear != null || state.includeAdult,
-                    onClick = { showFilters = true },
-                    label = {
-                        Text(
-                            if (state.selectedYear == null && !state.includeAdult) {
-                                "Filters"
-                            } else {
-                                "Filters active"
-                            },
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Outlined.Tune, contentDescription = null)
-                    },
-                )
-                TextButton(onClick = onRefresh) {
-                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
-                    Text("Refresh", modifier = Modifier.padding(start = 4.dp))
-                }
-            }
-            LazyColumn(
-                contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(state.filteredEntries, key = { it.mediaId }) { entry ->
-                    AnnouncementCard(entry = entry, onClick = { onCardClick(entry) })
-                }
-            }
-        }
-
-        if (showFilters) {
-            FiltersDialog(
-                state = state,
-                onDismiss = { showFilters = false },
-                onSelectYear = onSelectYear,
-                onSetIncludeAdult = onSetIncludeAdult,
-                onSetAutoRefresh = onSetAutoRefresh,
-            )
-        }
-    }
-
-    @Composable
-    private fun CategoryChipsRow(
-        selected: AnnouncementCategory?,
-        onSelect: (AnnouncementCategory?) -> Unit,
-    ) {
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        LazyColumn(
+            contentPadding = contentPadding,
+            modifier = Modifier.fillMaxSize(),
         ) {
-            item {
-                FilterChip(
-                    selected = selected == null,
-                    onClick = { onSelect(null) },
-                    label = { Text("All") },
-                )
-            }
-            items(AnnouncementCategory.entries.toList()) { category ->
-                FilterChip(
-                    selected = selected == category,
-                    onClick = { onSelect(category) },
-                    label = { Text(category.displayName()) },
-                )
+            items(state.filteredEntries, key = { it.mediaId }) { entry ->
+                AnnouncementCard(entry = entry, onClick = { onCardClick(entry) })
             }
         }
     }
 
+    @OptIn(ExperimentalLayoutApi::class)
     @Composable
-    private fun FiltersDialog(
+    private fun AnnouncementsFilterSheet(
         state: AnnouncementsScreenModel.State.Success,
-        onDismiss: () -> Unit,
+        onDismissRequest: () -> Unit,
+        onSelectCategory: (AnnouncementCategory?) -> Unit,
+        onSelectSort: (AnnouncementSort) -> Unit,
         onSelectYear: (Int?) -> Unit,
         onSetIncludeAdult: (Boolean) -> Unit,
         onSetAutoRefresh: (AnnouncementAutoRefresh) -> Unit,
+        onReset: () -> Unit,
     ) {
-        var showYears by remember { mutableStateOf(false) }
-        var showRefreshOptions by remember { mutableStateOf(false) }
-
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Filters") },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+        AdaptiveSheet(onDismissRequest = onDismissRequest) {
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+                    .verticalScroll(scrollState),
+            ) {
+                // Header row with Title and Reset button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Year", style = MaterialTheme.typography.labelLarge)
-                    Box {
-                        OutlinedButton(onClick = { showYears = true }) {
-                            Text(state.selectedYear?.toString() ?: "Any")
-                        }
-                        DropdownMenu(
-                            expanded = showYears,
-                            onDismissRequest = { showYears = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Any") },
-                                onClick = {
-                                    onSelectYear(null)
-                                    showYears = false
-                                },
+                    Text(
+                        text = stringResource(MR.strings.action_filter),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    TextButton(onClick = onReset) {
+                        Text(text = stringResource(MR.strings.action_reset))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Category Section
+                Text(
+                    text = "Category",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    FilterChip(
+                        selected = state.selectedCategory == null,
+                        onClick = { onSelectCategory(null) },
+                        label = { Text("All") },
+                    )
+                    AnnouncementCategory.entries.forEach { category ->
+                        FilterChip(
+                            selected = state.selectedCategory == category,
+                            onClick = { onSelectCategory(category) },
+                            label = { Text(category.displayName()) },
+                        )
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // Sort Section (integrated directly inside Filters)
+                Text(
+                    text = stringResource(MR.strings.action_sort),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    AnnouncementSort.entries.forEach { sort ->
+                        FilterChip(
+                            selected = state.sort == sort,
+                            onClick = { onSelectSort(sort) },
+                            label = { Text(sort.displayName()) },
+                        )
+                    }
+                }
+
+                if (state.availableYears.isNotEmpty()) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    // Release Year Section
+                    Text(
+                        text = "Release Year",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        FilterChip(
+                            selected = state.selectedYear == null,
+                            onClick = { onSelectYear(null) },
+                            label = { Text("Any") },
+                        )
+                        state.availableYears.forEach { year ->
+                            FilterChip(
+                                selected = state.selectedYear == year,
+                                onClick = { onSelectYear(year) },
+                                label = { Text(year.toString()) },
                             )
-                            state.availableYears.forEach { year ->
-                                DropdownMenuItem(
-                                    text = { Text(year.toString()) },
-                                    onClick = {
-                                        onSelectYear(year)
-                                        showYears = false
-                                    },
-                                )
-                            }
                         }
                     }
-                    FilterSwitchRow(
-                        label = "18+",
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // 18+ Content Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Include 18+ Content",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = "Show adult and NSFW announcements",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
                         checked = state.includeAdult,
                         onCheckedChange = onSetIncludeAdult,
                     )
-                    Text("Auto refresh", style = MaterialTheme.typography.labelLarge)
-                    Box {
-                        OutlinedButton(onClick = { showRefreshOptions = true }) {
-                            Text(state.autoRefresh.displayName())
-                        }
-                        DropdownMenu(
-                            expanded = showRefreshOptions,
-                            onDismissRequest = { showRefreshOptions = false },
-                        ) {
-                            AnnouncementAutoRefresh.entries.forEach { refresh ->
-                                DropdownMenuItem(
-                                    text = { Text(refresh.displayName()) },
-                                    onClick = {
-                                        onSetAutoRefresh(refresh)
-                                        showRefreshOptions = false
-                                    },
-                                )
-                            }
-                        }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // Auto Refresh Interval
+                Text(
+                    text = "Auto Refresh Interval",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    AnnouncementAutoRefresh.entries.forEach { refresh ->
+                        FilterChip(
+                            selected = state.autoRefresh == refresh,
+                            onClick = { onSetAutoRefresh(refresh) },
+                            label = { Text(refresh.displayName()) },
+                        )
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = onDismiss) {
-                    Text("Done")
-                }
-            },
-        )
-    }
-
-    @Composable
-    private fun FilterSwitchRow(
-        label: String,
-        checked: Boolean,
-        onCheckedChange: (Boolean) -> Unit,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(label)
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+            }
         }
     }
 
