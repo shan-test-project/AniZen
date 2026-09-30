@@ -43,6 +43,16 @@ android {
             enableV2Signing = true
             enableV3Signing = true
         }
+        // Consistent debug keystore used by all CI debug / r8Debug builds
+        getByName("debug") {
+            storeFile = file("anizen-debug.jks")
+            storePassword = System.getenv("DEBUG_STORE_PASSWORD") ?: "anizen_debug_pass"
+            keyAlias = System.getenv("DEBUG_KEY_ALIAS") ?: "anizen-debug"
+            keyPassword = System.getenv("DEBUG_KEY_PASSWORD") ?: "anizen_debug_pass"
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
     }
 
     compileSdk = 36
