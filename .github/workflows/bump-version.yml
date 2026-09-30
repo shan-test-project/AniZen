@@ -1,0 +1,74 @@
+name: Bump Version on Code Change
+
+on:
+  push:
+    branches:
+      - new-features
+      - master
+      - preview
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/bump-version.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bump-version:
+    name: Bump App Version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Bump version
+        id: bump
+        run: |
+          GRADLE_FILE="app/build.gradle.kts"
+
+          CURRENT_VC=$(grep "versionCode =" "$GRADLE_FILE" | sed 's/[^0-9]*//g')
+          NEW_VC=$((CURRENT_VC + 1))
+
+          CURRENT_VN=$(grep "versionName =" "$GRADLE_FILE" | sed 's/.*"\(.*\)".*/\1/')
+          CLEAN_VN=$(echo "$CURRENT_VN" | sed 's/-MOD//')
+
+          MAJOR=$(echo "$CLEAN_VN" | cut -d'.' -f1)
+          MINOR=$(echo "$CLEAN_VN" | cut -d'.' -f2)
+          PATCH=$(echo "$CLEAN_VN" | cut -d'.' -f3)
+
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VN="${MAJOR}.${MINOR}.${NEW_PATCH}"
+
+          sed -i "s/versionCode = $CURRENT_VC/versionCode = $NEW_VC/" "$GRADLE_FILE"
+          sed -i "s/versionName = \"$CURRENT_VN\"/versionName = \"$NEW_VN\"/" "$GRADLE_FILE"
+
+          echo "Bumped versionCode from $CURRENT_VC to $NEW_VC"
+          echo "Bumped versionName from $CURRENT_VN to $NEW_VN"
+
+          echo "NEW_VN=$NEW_VN" >> "$GITHUB_ENV"
+          echo "NEW_VC=$NEW_VC" >> "$GITHUB_ENV"
+
+      - name: Commit and Push Version Bump
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts
+          git commit -m "chore: bump version to ${{ env.NEW_VN }}" || echo "No changes to commit"
+          git push origin HEAD:${{ github.ref_name }}

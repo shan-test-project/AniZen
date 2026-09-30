@@ -1,0 +1,101 @@
+name: Universal Debug APK Build
+
+on:
+  push:
+    branches:
+      - new-features
+      - master
+      - preview
+  pull_request:
+    branches:
+      - new-features
+      - master
+      - preview
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-debug-apks:
+    name: Build Debug-Signed APKs (Universal)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Restore Gradle Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Get current version
+        id: get_version
+        run: |
+          CURRENT_VN=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          CURRENT_VC=$(grep "versionCode =" app/build.gradle.kts | sed 's/[^0-9]*//g')
+          test -n "$CURRENT_VN"
+          echo "VERSION=$CURRENT_VN" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$CURRENT_VC" >> "$GITHUB_ENV"
+          echo "Building AniZen v$CURRENT_VN (code=$CURRENT_VC)"
+
+      - name: Build Universal Debug-Signed APKs
+        run: ./gradlew assembleDebug assembleR8Debug -Pinclude-telemetry=false -Penable-updater=false --no-daemon
+        env:
+          SIGNING_STORE_PASSWORD: android
+          SIGNING_KEY_ALIAS: androiddebugkey
+          SIGNING_KEY_PASSWORD: android
+
+      - name: Rename and validate APKs
+        run: |
+          VERSION="${{ env.VERSION }}"
+          mkdir -p dist
+          find app/build/outputs/apk -type f -name "*.apk" | while read -r apk; do
+            base=$(basename "$apk" .apk)
+            cp "$apk" "dist/AniZen-v${VERSION}-${base}.apk"
+            echo "Packed: dist/AniZen-v${VERSION}-${base}.apk ($(stat -c%s "$apk") bytes)"
+          done
+          test -n "$(ls dist/*.apk 2>/dev/null)" || (echo "No APKs found!" && exit 1)
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AniZen-v${{ env.VERSION }}-debug-universal
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Save Gradle Cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}

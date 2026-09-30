@@ -125,9 +125,25 @@ jobs:
             }')
           
           echo "Requesting AI summary from Gemini (gemini-flash-latest)..."
-          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$GEMINI_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD")
+          # Retry logic with exponential backoff for 429 Rate Limit
+          RETRY_COUNT=0
+          MAX_RETRIES=5
+          SLEEP_TIME=10
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD")
+            
+            # Check if 429 Too Many Requests or quota error occurred
+            if echo "$RESPONSE" | grep -q "RESOURCE_EXHAUSTED\|429"; then
+              echo "Rate limited (429/RESOURCE_EXHAUSTED). Retrying in ${SLEEP_TIME}s (Attempt $((RETRY_COUNT+1))/$MAX_RETRIES)..."
+              sleep $SLEEP_TIME
+              SLEEP_TIME=$((SLEEP_TIME * 2))
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            else
+              break
+            fi
+          done
           
           SUMMARY=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
           
