@@ -36,6 +36,10 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+          # Persist and share the Gradle dependency + build cache across runs
+          # so subsequent APK builds do not start from scratch
 
       - name: Run Code Analysis (Detekt)
         run: ./gradlew detekt --no-daemon
