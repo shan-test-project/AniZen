@@ -27,7 +27,9 @@ class AnnouncementsApi(
         val pageResults = coroutineScope {
             (1..pageLimit).map { page ->
                 async {
-                    fetchPage(page, QUERY_POPULARITY)
+                    runCatching { fetchPage(page, QUERY_POPULARITY) }.getOrElse {
+                        PageResult(media = emptyList(), hasNextPage = false)
+                    }
                 }
             }.awaitAll()
         }
