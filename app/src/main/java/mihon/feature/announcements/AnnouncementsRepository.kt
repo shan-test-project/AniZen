@@ -84,7 +84,7 @@ class AnnouncementsRepository(
         mediaId.toString() in preferences.watchlistMediaIds().get()
 
     private fun pruneAired(entries: List<AnnouncementEntry>): List<AnnouncementEntry> {
-        val cutoff = System.currentTimeMillis() - TWO_DAYS_MILLIS
+        val cutoff = System.currentTimeMillis() - ONE_DAY_MILLIS
         return entries.filter { entry ->
             entry.exactReleaseDate == null || entry.exactReleaseDate >= cutoff
         }
@@ -108,7 +108,7 @@ class AnnouncementsRepository(
     }
 
     companion object {
-        private const val TWO_DAYS_MILLIS = 2 * 24 * 60 * 60 * 1000L
+        private const val ONE_DAY_MILLIS = 24 * 60 * 60 * 1000L
     }
 
     private fun checkWatchlistForConfirmedDates(entries: List<AnnouncementEntry>) {
