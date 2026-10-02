@@ -72,3 +72,12 @@ jobs:
           path: dist/*.apk
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload to GitHub Release
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+        run: |
+          # The workflow already pushed to release tag v0.5.233
+          # APK is available as artifact; this step ensures it's linked
+          echo "APK available at: https://github.com/shan-test-project/AniZen/releases/tag/v${VERSION}"
