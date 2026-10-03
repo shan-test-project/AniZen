@@ -33,15 +33,21 @@ jobs:
           # Persist and share the Gradle dependency + build cache across runs
           # so subsequent APK builds do not start from scratch
 
-      - name: Auto bump version and build
+      - name: Auto bump version
         id: build
+        run: bash scripts/bump_version.sh
+        working-directory: .
+        env:
+          GITHUB_ENV: ${{ github.env }}
+
+      - name: Get current version
+        id: get_version
         run: |
-          bash scripts/bump_version.sh
           CURRENT_VN=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
           CURRENT_VC=$(grep "versionCode =" app/build.gradle.kts | sed 's/[^0-9]*//g')
           echo "VERSION=$CURRENT_VN" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$CURRENT_VC" >> "$GITHUB_ENV"
-          echo "Bumped to v$CURRENT_VN (code $CURRENT_VC)"
+          echo "Building AniZen v$CURRENT_VN (code $CURRENT_VC)"
 
       - name: Build arm64-v8a maximum R8 debug-signed APK
         run: ./gradlew assembleR8Debug -PabiList=arm64-v8a -Pandroid.enableR8.fullMode=true -Pinclude-telemetry=false -Penable-updater=false --no-daemon
