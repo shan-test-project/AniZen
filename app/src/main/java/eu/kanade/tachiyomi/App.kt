@@ -157,8 +157,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             
             val syncPreferences: SyncPreferences = Injekt.get()
             val syncTriggerOpt = syncPreferences.getSyncTriggerOptions()
+            // Defer sync job to reduce startup ANR (start with delay, only if enabled)
             if (syncPreferences.isSyncEnabled() && syncTriggerOpt.syncOnAppStart) {
-                SyncDataJob.startNow(this@App)
+                ProcessLifecycleOwner.get().lifecycleScope.launch {
+                    kotlinx.coroutines.delay(5000L) // 5 second delay for low-end stability
+                    SyncDataJob.startNow(this@App)
+                }
             }
         }
 
@@ -177,10 +181,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             Security.insertProviderAt(Conscrypt.newProvider(), 1)
         }
 
-        // Avoid potential crashes
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val process = getProcessName()
-            if (packageName != process) WebView.setDataDirectorySuffix(process)
+        // Defer WebView initialization to background for low-end stability
+        ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val process = getProcessName()
+                if (packageName != process) WebView.setDataDirectorySuffix(process)
+            }
         }
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
@@ -267,13 +273,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
             memoryCache {
                 MemoryCache.Builder()
-                    .maxSizePercent(this@App, 0.25) // Balanced 25% RAM allocation for stability
+                    .maxSizePercent(this@App, 0.1) // Reduced from 25% to 10% for low-end stability
                     .build()
             }
             diskCache {
                 DiskCache.Builder()
                     .directory(this@App.cacheDir.resolve("image_cache").absolutePath.toPath())
-                    .maxSizeBytes(500L * 1024 * 1024) // Maintain 500MB disk cache for high retention
+                    .maxSizeBytes(100L * 1024 * 1024) // Reduced from 500MB to 100MB for low-end
                     .build()
             }
 
@@ -292,7 +298,15 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             SyncDataJob.startNow(this@App)
         }
 
-        DiscordRPCService.start(applicationContext)
+        // Defer Discord RPC start to reduce startup load (only when connection settings require)
+        ProcessLifecycleOwner.get().lifecycleScope.launch(Dispatchers.IO) {
+            val connectionsPreferences: ConnectionsPreferences = Injekt.get()
+            if (connectionsPreferences.enableDiscordRPC().get()) {
+                withUIContext<Unit> {
+                    DiscordRPCService.start(applicationContext)
+                }
+            }
+        }
     }
 
     override fun onStop(owner: LifecycleOwner) {

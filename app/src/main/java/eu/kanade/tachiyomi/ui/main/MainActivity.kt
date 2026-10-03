@@ -340,7 +340,7 @@ class MainActivity : BaseActivity() {
                 val episodeId = savedInstanceState?.getLong(SAVED_STATE_EPISODE_KEY)
 
                 if (animeId != null && episodeId != null) {
-                    runBlocking {
+                    lifecycleScope.launch(Dispatchers.IO) {
                         ExternalIntents.externalIntents.initAnime(animeId, episodeId)
                     }
                 }
